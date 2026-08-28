@@ -10,5 +10,8 @@
   },
   "vars": {
     "GOVEE_TEMPERATURE_UNIT": "fahrenheit"
+  },
+  "secrets": {
+    "required": ["GOVEE_API_KEY"]
   }
 }
