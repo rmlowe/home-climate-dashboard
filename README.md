@@ -65,7 +65,7 @@ The production Worker is protected with Cloudflare Access for approved household
 
 ## History collection
 
-The Worker includes a five-minute scheduled collector, but **collection is disabled until D1 is provisioned and the commented configuration is enabled**. Deploying the default configuration continues to serve the live dashboard without a database.
+The Worker includes a five-minute scheduled collector, and the provisioned D1 database is bound as `DB`. **Collection remains disabled until the migration is applied and the commented cron configuration is enabled**. The live endpoint does not query D1.
 
 The collector calls Govee directly, independently of browser traffic and the live endpoint's cache. It retains all readings in D1; no history endpoint or charts are included yet.
 
@@ -87,14 +87,14 @@ Tests need no API key, Cloudflare account or installed dependencies. They mock G
 
 ### Enable collection in production
 
-1. Create the database in the same Cloudflare account as the Worker:
+1. The production database `home-climate-history` has been created and its ID is configured in `wrangler.jsonc`. For a new installation, create a database in the same Cloudflare account as the Worker:
 
    ```bash
    npx wrangler login
    npx wrangler d1 create home-climate-history --location weur
    ```
 
-2. Uncomment `d1_databases` in `wrangler.jsonc` and replace `REPLACE_WITH_CREATED_DATABASE_ID` with the returned UUID. Keep the binding name `DB`. Do not deploy a placeholder ID.
+2. The production `d1_databases` binding is already enabled. For a new installation, replace its `database_id` with your returned UUID. Keep the binding name `DB`. Do not deploy a placeholder ID.
 3. Apply the migration before deploying the collector:
 
    ```bash
@@ -114,7 +114,7 @@ To stop collection, set `triggers.crons` to an empty array and deploy. Keep D1 a
 
 ### Local collection smoke test
 
-Uncomment the D1 binding locally and set `database_id` to a local placeholder such as `local-history`; never commit that value or deploy it. With the existing `.dev.vars` API key:
+For local-only testing, set `database_id` to a local placeholder such as `local-history`; never commit that value or deploy it. With the existing `.dev.vars` API key:
 
 ```bash
 npx wrangler d1 migrations apply home-climate-history --local
