@@ -161,3 +161,16 @@ test("live endpoint keeps response shape, cache and device IDs private without a
   assert.deepEqual(body.rooms[0], { name: "Living room", temperature: 25, humidity: 45, online: true });
   assert.ok(cached);
 });
+
+test("initial migration adopts the manually created table without losing data", () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    const migration = readFileSync(new URL("../migrations/0001_readings.sql", import.meta.url), "utf8");
+    sqlite.exec(migration.replace("CREATE TABLE IF NOT EXISTS", "CREATE TABLE"));
+    sqlite.exec("INSERT INTO readings VALUES ('sensor', 0, 1, 'Room', 20, 45, 1)");
+    sqlite.exec(migration);
+    sqlite.exec(migration);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM readings").get().count, 1);
+    assert.equal(sqlite.prepare("SELECT temperature_c FROM readings").get().temperature_c, 20);
+  } finally { sqlite.close(); }
+});
