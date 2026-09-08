@@ -65,7 +65,7 @@ The production Worker is protected with Cloudflare Access for approved household
 
 ## History collection
 
-The Worker includes a five-minute scheduled collector, and the provisioned D1 database is bound as `DB`. **Collection remains disabled until the migration is applied and the commented cron configuration is enabled**. The live endpoint does not query D1.
+The Worker includes a five-minute scheduled collector, and the provisioned D1 database is bound as `DB`. The five-minute cron is enabled in configuration and starts collecting once this version is deployed. The owner confirmed creation of the production readings table via D1 Console on 8 September 2026; production collection has not yet been verified. The live endpoint does not query D1.
 
 The collector calls Govee directly, independently of browser traffic and the live endpoint's cache. It retains all readings in D1; no history endpoint or charts are included yet.
 
@@ -95,13 +95,15 @@ Tests need no API key, Cloudflare account or installed dependencies. They mock G
    ```
 
 2. The production `d1_databases` binding is already enabled. For a new installation, replace its `database_id` with your returned UUID. Keep the binding name `DB`. Do not deploy a placeholder ID.
-3. Apply the migration before deploying the collector:
+3. For a new database, apply the migration before deploying the collector. The production table was created manually using the same schema, so this step can also be run later to register migration `0001_readings.sql` in Wrangler's migration tracking:
 
    ```bash
    npx wrangler d1 migrations apply home-climate-history --remote
    ```
 
-4. Uncomment `triggers` (`*/5 * * * *`). Commit the real binding and schedule to the repo so future deployments preserve them, then deploy through the normal production workflow or `npm run deploy`. The existing `GOVEE_API_KEY` secret is reused.
+   The initial migration uses `CREATE TABLE IF NOT EXISTS` to preserve the manually created table and any collected data. This does not validate or repair a different existing schema; it is intended for the identical schema from this repository.
+
+4. The binding and `triggers` (`*/5 * * * *`) are already enabled in this repository. Deploy through the normal production workflow or `npm run deploy`. The existing `GOVEE_API_KEY` secret is reused.
 5. After the schedule takes effect, verify rows increase across two five-minute slots:
 
    ```bash
