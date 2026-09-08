@@ -1,6 +1,7 @@
 -- Timestamps are Unix milliseconds in UTC. collected_at is fetch time, not measurement time.
 -- The primary key also supports per-device time-range queries and idempotent cron replay.
-CREATE TABLE readings (
+-- IF NOT EXISTS also permits adopting the identical table created via D1 Console.
+CREATE TABLE IF NOT EXISTS readings (
   device_id TEXT NOT NULL,
   scheduled_at INTEGER NOT NULL,
   collected_at INTEGER NOT NULL,
