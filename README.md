@@ -24,7 +24,7 @@ The dashboard is installable as a PWA. It includes a web app manifest, install i
 
 ## Local development
 
-Prerequisites: Node.js and npm.
+Prerequisites: Node.js 24+ and npm (tests use Node's built-in SQLite).
 
 ```bash
 npm install
@@ -63,6 +63,70 @@ The production Worker is protected with Cloudflare Access for approved household
 - Cloudflare Access protects the Worker before requests reach the application.
 - The PWA service worker does not cache HTML navigations or `/api/readings`.
 
+## History collection
+
+The Worker includes a five-minute scheduled collector, and the provisioned D1 database is bound as `DB`. The five-minute cron is enabled in configuration and starts collecting once this version is deployed. The owner confirmed creation of the production readings table via D1 Console on 8 September 2026; production collection has not yet been verified. The live endpoint does not query D1.
+
+The collector calls Govee directly, independently of browser traffic and the live endpoint's cache. It retains all readings in D1; no history endpoint or charts are included yet.
+
+- One row per device and five-minute UTC slot. The primary key prevents duplicate writes when a slot is replayed.
+- `collected_at` is the actual fetch time; `scheduled_at` identifies the cron slot. Both are Unix milliseconds, not sensor measurement timestamps.
+- Device identity combines SKU and Govee device ID, so renaming a room does not split its history. IDs remain server-side.
+- Missing or malformed metrics are SQL NULL. Offline or unknown-status sensors retain their status but have NULL metrics.
+- Failed sensor requests produce gaps. Other sensors are saved first, then the invocation fails visibly. Discovery and database failures also propagate.
+- Each Govee request has a ten-second timeout. There are no application retries; the next scheduled run collects a new slot.
+- At two sensors this adds 576 rows/day and approximately 864 Govee requests/day (one discovery and two state requests per run), in addition to live-dashboard traffic.
+
+### Tests
+
+```bash
+npm test
+```
+
+Tests need no API key, Cloudflare account or installed dependencies. They mock Govee HTTP responses and execute the actual migration and collector SQL in an in-memory SQLite database through a small D1 adapter. GitHub Actions runs them on pull requests. They do not validate Cloudflare deployment or a live Govee connection.
+
+### Enable collection in production
+
+1. The production database `home-climate-history` has been created and its ID is configured in `wrangler.jsonc`. For a new installation, create a database in the same Cloudflare account as the Worker:
+
+   ```bash
+   npx wrangler login
+   npx wrangler d1 create home-climate-history --location weur
+   ```
+
+2. The production `d1_databases` binding is already enabled. For a new installation, replace its `database_id` with your returned UUID. Keep the binding name `DB`. Do not deploy a placeholder ID.
+3. For a new database, apply the migration before deploying the collector. The production table was created manually using the same schema, so this step can also be run later to register migration `0001_readings.sql` in Wrangler's migration tracking:
+
+   ```bash
+   npx wrangler d1 migrations apply home-climate-history --remote
+   ```
+
+   The initial migration uses `CREATE TABLE IF NOT EXISTS` to preserve the manually created table and any collected data. This does not validate or repair a different existing schema; it is intended for the identical schema from this repository.
+
+4. The binding and `triggers` (`*/5 * * * *`) are already enabled in this repository. Deploy through the normal production workflow or `npm run deploy`. The existing `GOVEE_API_KEY` secret is reused.
+5. After the schedule takes effect, verify rows increase across two five-minute slots:
+
+   ```bash
+   npx wrangler d1 execute home-climate-history --remote --command "SELECT device_name, COUNT(*) AS samples, datetime(MAX(collected_at)/1000, 'unixepoch') AS latest_collected_utc FROM readings GROUP BY device_id, device_name;"
+   ```
+
+   Inspect scheduled invocation failures and `history_collection` logs using `npx wrangler tail`. The log's `fetched` count includes successful responses even if a duplicate insert is skipped. Confirm `/api/readings` still works behind Cloudflare Access.
+
+To stop collection, set `triggers.crons` to an empty array and deploy. Keep D1 and its binding to preserve saved data. Do not merely omit the triggers section when removing an already-deployed schedule.
+
+### Local collection smoke test
+
+For local-only testing, set `database_id` to a local placeholder such as `local-history`; never commit that value or deploy it. With the existing `.dev.vars` API key:
+
+```bash
+npx wrangler d1 migrations apply home-climate-history --local
+npx wrangler dev --test-scheduled
+```
+
+Use Wrangler's local scheduled-event endpoint to invoke the collector, then inspect the table with `wrangler d1 execute home-climate-history --local`. Local execution uses real Govee requests but a local database; it does not write production history.
+
+References: [D1 setup](https://developers.cloudflare.com/d1/get-started/), [D1 migrations and commands](https://developers.cloudflare.com/workers/wrangler/commands/d1/), [Cron Triggers and local testing](https://developers.cloudflare.com/workers/configuration/cron-triggers/).
+
 ## Current scope
 
-Version 1 shows current readings. Possible later additions include historical charts, min/max values, comfort indicators, custom domains, and temperature/humidity alerts.
+The dashboard shows current readings, with optional background D1 collection once configured. Next additions include a history API, historical charts, min/max values, comfort indicators, custom domains, and temperature/humidity alerts.
