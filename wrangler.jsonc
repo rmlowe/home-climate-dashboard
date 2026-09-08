@@ -8,13 +8,13 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
-  // Enable both sections after creating D1 and applying migrations (see README).
-  // "d1_databases": [{
-  //   "binding": "DB",
-  //   "database_name": "home-climate-history",
-  //   "database_id": "REPLACE_WITH_CREATED_DATABASE_ID",
-  //   "migrations_dir": "migrations"
-  // }],
+  // Apply migrations before enabling the schedule below (see README).
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "home-climate-history",
+    "database_id": "27a4c38a-b436-48a1-9bf7-3f18abb980ca",
+    "migrations_dir": "migrations"
+  }],
   // "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "GOVEE_TEMPERATURE_UNIT": "fahrenheit"
