@@ -1,5 +1,6 @@
 import { discoverThermometers, readThermometer } from "./govee.js";
 import { collectReadings } from "./collector.js";
+import { handleHistory } from "./history.js";
 const CACHE_TTL_SECONDS = 30;
 
 export default {
@@ -9,6 +10,8 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/history") return handleHistory(request, env);
 
     if (url.pathname === "/api/readings") {
       return handleReadings(request, env, ctx);

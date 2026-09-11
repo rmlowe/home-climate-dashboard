@@ -1,7 +1,9 @@
-const CACHE_NAME = "home-climate-static-v1";
+const CACHE_NAME = "home-climate-static-v2";
 const STATIC_ASSETS = [
   "/style.css",
   "/app.js",
+  "/history.js",
+  "/chart.js",
   "/manifest.webmanifest",
   "/icon-192.png",
   "/icon-512.png"
@@ -42,3 +44,4 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
