@@ -1,5 +1,6 @@
 import { discoverThermometers, readThermometer } from "./govee.js";
 import { collectReadings } from "./collector.js";
+import { handleHistory, roomKey } from "./history.js";
 const CACHE_TTL_SECONDS = 30;
 
 export default {
@@ -9,6 +10,8 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/history") return handleHistory(request, env);
 
     if (url.pathname === "/api/readings") {
       return handleReadings(request, env, ctx);
@@ -43,8 +46,8 @@ async function handleReadings(request, env, ctx) {
     const devices = await discoverThermometers(env);
     const rooms = await Promise.all(
       devices.map(async (device) => {
-        const { name, temperature, humidity, online } = await readThermometer(env, device);
-        return { name, temperature, humidity, online: online === true };
+        const { deviceId, name, temperature, humidity, online } = await readThermometer(env, device);
+        return { id: await roomKey(deviceId), name, temperature, humidity, online: online === true };
       })
     );
 

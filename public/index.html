@@ -25,8 +25,27 @@
     <section id="rooms" class="cards" aria-live="polite"></section>
 
     <p id="error" class="error" hidden></p>
+
+    <section id="history-section" class="history" aria-labelledby="history-heading">
+      <div class="history-head">
+        <div class="history-title">
+          <h2 id="history-heading" tabindex="-1">Last 24 hours</h2>
+          <p id="history-status" role="status">Loading history…</p>
+        </div>
+        <label>Room <select id="history-room" disabled></select></label>
+      </div>
+      <p id="history-error" class="error" role="status" hidden></p>
+      <details id="history-details" hidden>
+        <summary>Collection details</summary>
+        <p id="history-freshness" class="updated"></p>
+      </details>
+      <div id="history-charts"></div>
+      <p class="history-note">Times are local. Gaps mark missing or unavailable readings. Timestamps show when readings were collected.</p>
+    </section>
   </main>
 
   <script src="/app.js" defer></script>
+  <script type="module" src="/history.js"></script>
 </body>
 </html>
+

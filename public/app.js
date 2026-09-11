@@ -26,6 +26,7 @@ async function refresh() {
 }
 
 function renderRooms(rooms) {
+  const focusedRoom = document.activeElement?.dataset.historyId;
   roomsEl.replaceChildren(
     ...rooms.map((room) => {
       const card = document.createElement("article");
@@ -55,9 +56,23 @@ function renderRooms(rooms) {
         </div>
       `;
       card.querySelector("h2").textContent = room.name;
+      const shortcut = document.createElement("button");
+      shortcut.type = "button";
+      shortcut.className = "history-shortcut";
+      // A previously cached live response may lack the new key for up to 30 seconds.
+      shortcut.disabled = !room.id;
+      shortcut.dataset.historyId = room.id ?? '';
+      shortcut.textContent = "View 24-hour history";
+      shortcut.setAttribute("aria-label", `View ${room.name} history`);
+      shortcut.setAttribute("aria-controls", "history-section");
+      card.append(shortcut);
       return card;
     })
   );
+  if (focusedRoom) {
+    [...roomsEl.querySelectorAll(".history-shortcut")]
+      .find(button => button.dataset.historyId === focusedRoom)?.focus({ preventScroll: true });
+  }
 }
 
 if ("serviceWorker" in navigator) {
@@ -70,3 +85,4 @@ if ("serviceWorker" in navigator) {
 
 refresh();
 setInterval(refresh, 30_000);
+

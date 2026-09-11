@@ -146,7 +146,7 @@ test("database failure propagates to the scheduled invocation", async () => {
   await assert.rejects(worker.scheduled({ scheduledTime: slot }, { ...env, DB }), /D1 unavailable/);
 });
 
-test("live endpoint keeps response shape, cache and device IDs private without a DB", async () => {
+test("live endpoint supplies an opaque room key without a DB", async () => {
   mockGovee();
   let cached;
   globalThis.caches = { default: { match: async () => undefined, put: async (_, response) => { cached = response; } } };
@@ -158,7 +158,8 @@ test("live endpoint keeps response shape, cache and device IDs private without a
   assert.equal(response.headers.get("Cache-Control"), "public, max-age=30");
   const body = await response.json();
   assert.deepEqual(Object.keys(body).sort(), ["rooms", "updated"]);
-  assert.deepEqual(body.rooms[0], { name: "Living room", temperature: 25, humidity: 45, online: true });
+  assert.match(body.rooms[0].id, /^[a-f0-9]{64}$/);
+  assert.deepEqual(body.rooms[0], { id: body.rooms[0].id, name: "Living room", temperature: 25, humidity: 45, online: true });
   assert.ok(cached);
 });
 
