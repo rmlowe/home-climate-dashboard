@@ -7,6 +7,8 @@ const charts = document.querySelector('#history-charts');
 const error = document.querySelector('#history-error');
 let data;
 let busy = false;
+let requestedRoom;
+const details = document.querySelector('#history-details');
 
 function renderStatus() {
   const room = data?.rooms.find(r => r.id === select.value);
@@ -21,6 +23,7 @@ function renderCharts() {
   const room = data?.rooms.find(r => r.id === select.value);
   if (!room) return;
   charts.replaceChildren(chart(room, 'temperature', data), chart(room, 'humidity', data));
+  details.hidden = false;
   renderStatus();
 }
 async function refreshHistory() {
@@ -38,13 +41,18 @@ async function refreshHistory() {
       option.value = room.id; option.textContent = room.name;
       return option;
     }));
-    if (data.rooms.some(r => r.id === selected)) select.value = selected;
+    const target = requestedRoom ?? selected;
+    if (data.rooms.some(r => r.id === target)) {
+      select.value = target;
+      requestedRoom = undefined;
+    }
     select.disabled = !data.rooms.length;
     error.hidden = true;
     if (!data.rooms.length) {
-      charts.replaceChildren(); times.textContent = '';
+      charts.replaceChildren(); times.textContent = ''; details.hidden = true;
       status.textContent = 'No history collected yet.'; status.className = '';
     } else renderCharts();
+    if (requestedRoom) showMissingRoom();
   } catch (e) {
     console.error(e);
     error.textContent = data ? 'Unable to refresh history. Showing previously loaded data.' : 'Unable to load history. Retrying automatically.';
@@ -53,7 +61,31 @@ async function refreshHistory() {
     renderStatus();
   } finally { busy = false; }
 }
-select.addEventListener('change', renderCharts);
+function showMissingRoom() {
+  select.value = '';
+  charts.replaceChildren(); details.hidden = true;
+  status.textContent = data ? 'No history collected for this room yet.' : 'Loading room history…';
+  status.className = '';
+}
+document.querySelector('#rooms').addEventListener('click', event => {
+  const shortcut = event.target.closest('[data-history-id]');
+  if (!shortcut) return;
+  requestedRoom = shortcut.dataset.historyId;
+  if (data?.rooms.some(room => room.id === requestedRoom)) {
+    select.value = requestedRoom; requestedRoom = undefined;
+    renderCharts();
+  } else {
+    showMissingRoom();
+    refreshHistory();
+  }
+  const heading = document.querySelector('#history-heading');
+  heading.focus({ preventScroll: true });
+  document.querySelector('#history-section').scrollIntoView({
+    behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    block: 'start',
+  });
+});
+select.addEventListener('change', () => { requestedRoom = undefined; renderCharts(); });
 refreshHistory();
 setInterval(refreshHistory, 60_000);
 setInterval(renderStatus, 30_000);

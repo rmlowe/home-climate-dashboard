@@ -19,9 +19,8 @@ export async function readHistory(DB, now = Date.now()) {
       AND scheduled_at <= ? ORDER BY scheduled_at`)
       .bind(device_id, Math.floor(from / SLOT) * SLOT, now).all();
     // An opaque stable key supports duplicate names/renaming without exposing Govee IDs.
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(device_id));
     return {
-      id: Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join(''),
+      id: await roomKey(device_id),
       name: latest.device_name,
       lastCollectedAt: latest.collected_at,
       lastValidAt: valid?.collected_at ?? null,
@@ -51,4 +50,9 @@ export async function handleHistory(request, env) {
     console.error('Unable to read history', error);
     return Response.json({ error: 'Unable to retrieve history' }, { status: 503, headers });
   }
+}
+
+export async function roomKey(deviceId) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(deviceId));
+  return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, '0')).join('');
 }
