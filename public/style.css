@@ -147,3 +147,17 @@ h1 {
 #history-section { scroll-margin-top: 20px; }
 
 .history-shortcut:disabled { color: #64748b; cursor: default; }
+
+.outdoor { margin-top: 20px; padding: 18px 20px; border: 1px solid #b6d3c9; border-radius: 18px; background: #eef7f3; }
+.outdoor-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+.outdoor h2 { margin: 0; font-size: 18px; }
+.outdoor-head span, .outdoor p, .outdoor summary { font-size: 14px; line-height: 1.5; }
+.outdoor-values { display: flex; flex-wrap: wrap; gap: 12px 28px; margin-top: 12px; }
+.outdoor-values strong { margin-left: 8px; font-size: 24px; }
+.outdoor summary { cursor: pointer; padding: 10px 0; }
+.outdoor p { margin: 8px 0; }
+.outdoor a { color: #17654f; }
+.outdoor-comparison { margin: 14px 0 0; color: #426357; font-size: 13px; line-height: 1.4; }
+.series-line.outdoor-series { stroke: #218068; stroke-dasharray: 6 4; }
+.series-point.outdoor-series { fill: #218068; }
+.chart-legend { font-size: 13px; color: #59616d; }

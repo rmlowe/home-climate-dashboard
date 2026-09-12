@@ -1,3 +1,5 @@
+import { outdoorSegments, weatherFresh } from './weather-model.js';
+
 // Points arrive in collection order. Break on replayed/missing slots and invalid readings.
 export function segments(points, metric, intervalMs) {
   const result = [];
@@ -38,7 +40,7 @@ function svgNode(tag, attributes = {}, text) {
   return node;
 }
 
-export function chart(room, metric, data) {
+export function chart(room, metric, data, weather) {
   const unit = metric === 'temperature' ? '°C' : '%';
   const label = metric === 'temperature' ? 'Temperature' : 'Relative humidity';
   const figure = document.createElement('figure');
@@ -47,7 +49,17 @@ export function chart(room, metric, data) {
   caption.textContent = label;
   figure.append(caption);
   const runs = segments(room.points, metric, data.intervalMs);
-  const points = runs.flat();
+  const outsideRuns = outdoorSegments(weather?.points || [], metric, data.from, data.to);
+  const series = [
+    { name: room.name, runs, className: '' },
+    { name: 'Outside estimate', runs: outsideRuns, className: ' outdoor-series' },
+  ];
+  const points = [...runs.flat(), ...outsideRuns.flat()];
+  const legend = document.createElement('p');
+  legend.className = 'chart-legend';
+  legend.textContent = `${room.name}: solid · Outside estimate: green dashed` +
+    (!outsideRuns.length ? ' · Outdoor history unavailable' : !weatherFresh(weather) ? ' · Outdoor update delayed' : '');
+  figure.append(legend);
   if (!points.length) {
     const empty = document.createElement('p');
     empty.textContent = `No valid ${label.toLowerCase()} readings in the last 24 hours.`;
@@ -64,7 +76,7 @@ export function chart(room, metric, data) {
   const x = t => 58 + (t - data.from) / (data.to - data.from) * (right - 58);
   const y = v => 184 - (v - low) / (high - low) * 160;
   const svg = svgNode('svg', { viewBox: `0 0 ${width} 226`, role: 'img',
-    'aria-label': `${room.name}: ${label} over the last 24 hours. Minimum ${min.toFixed(1)}${unit}, maximum ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
+    'aria-label': `${room.name} and outside estimate: ${label} over the last 24 hours. Minimum ${min.toFixed(1)}${unit}, maximum ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
   for (let i = 0; i <= 4; i++) {
     const value = low + (high - low) * i / 4;
     svg.append(svgNode('line', { x1: 58, x2: right, y1: y(value), y2: y(value), class: 'grid-line' }));
@@ -76,11 +88,11 @@ export function chart(room, metric, data) {
     svg.append(svgNode('text', { x: x(time), y: 214, 'text-anchor': i === 0 ? 'start' : i === ticks ? 'end' : 'middle' },
       new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })));
   }
-  for (const run of runs) {
-    svg.append(svgNode('polyline', { points: run.map(p => `${x(p.collectedAt)},${y(p[metric])}`).join(' '), class: 'series-line' }));
+  for (const item of series) for (const run of item.runs) {
+    svg.append(svgNode('polyline', { points: run.map(p => `${x(p.collectedAt)},${y(p[metric])}`).join(' '), class: 'series-line' + item.className }));
     for (const point of run) {
-      const dot = svgNode('circle', { cx: x(point.collectedAt), cy: y(point[metric]), r: run.length === 1 ? 3 : 1.5, class: 'series-point' });
-      dot.append(svgNode('title', {}, `${new Date(point.collectedAt).toLocaleString()}: ${point[metric].toFixed(1)}${unit}`));
+      const dot = svgNode('circle', { cx: x(point.collectedAt), cy: y(point[metric]), r: run.length === 1 ? 3 : 1.5, class: 'series-point' + item.className });
+      dot.append(svgNode('title', {}, `${item.name} · ${new Date(point.collectedAt).toLocaleString()}: ${point[metric].toFixed(1)}${unit}`));
       svg.append(dot);
     }
   }
@@ -95,12 +107,18 @@ export function chart(room, metric, data) {
   details.append(summary);
   const table = document.createElement('table');
   const head = table.createTHead().insertRow();
-  for (const text of ['Collected (local time)', `${label} (${unit})`]) {
+  for (const text of ['Source', 'Time (local)', `${label} (${unit})`]) {
     const th = document.createElement('th'); th.scope = 'col'; th.textContent = text; head.append(th);
   }
   const body = table.createTBody();
-  for (const point of room.points) {
+  const rows = [
+    ...room.points.map(p => ({ ...p, source: room.name })),
+    ...(weather?.points || []).filter(p => p.validAt >= data.from && p.validAt <= data.to)
+      .map(p => ({ ...p, collectedAt: p.validAt, online: true, source: 'Outside estimate' })),
+  ].sort((a, b) => a.collectedAt - b.collectedAt);
+  for (const point of rows) {
     const row = body.insertRow();
+    row.insertCell().textContent = point.source;
     row.insertCell().textContent = new Date(point.collectedAt).toLocaleString();
     row.insertCell().textContent = point.online === true && Number.isFinite(point[metric]) ? point[metric].toFixed(1) : 'Unavailable';
   }

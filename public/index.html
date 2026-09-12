@@ -26,6 +26,17 @@
 
     <p id="error" class="error" hidden></p>
 
+    <section class="outdoor" aria-labelledby="outdoor-heading">
+      <div class="outdoor-head"><h2 id="outdoor-heading">Outside · local estimate</h2><span id="weather-location">Mill Hill East</span></div>
+      <div class="outdoor-values"><span>Temperature <strong id="outdoor-temperature">—</strong></span><span>Humidity <strong id="outdoor-humidity">—</strong></span></div>
+      <p id="weather-status" role="status">Loading outdoor estimate…</p>
+      <details><summary>About this estimate</summary>
+        <p>Modelled conditions for the local area, not a balcony measurement. Outdoor chart points are hourly estimates.</p>
+        <p id="weather-times"></p>
+        <p>Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a>, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>.</p>
+      </details>
+    </section>
+
     <section id="history-section" class="history" aria-labelledby="history-heading">
       <div class="history-head">
         <div class="history-title">
@@ -40,7 +51,7 @@
         <p id="history-freshness" class="updated"></p>
       </details>
       <div id="history-charts"></div>
-      <p class="history-note">Times are local. Gaps mark missing or unavailable readings. Timestamps show when readings were collected.</p>
+      <p class="history-note">Times are local. Gaps mark missing or unavailable readings. Indoor timestamps show when readings were collected; outdoor timestamps show when the estimates apply.</p>
     </section>
   </main>
 

@@ -1,4 +1,5 @@
 import { chart, freshness } from './chart.js';
+import { weather } from './weather.js';
 
 const select = document.querySelector('#history-room');
 const status = document.querySelector('#history-status');
@@ -22,7 +23,7 @@ function renderStatus() {
 function renderCharts() {
   const room = data?.rooms.find(r => r.id === select.value);
   if (!room) return;
-  charts.replaceChildren(chart(room, 'temperature', data), chart(room, 'humidity', data));
+  charts.replaceChildren(chart(room, 'temperature', data, weather), chart(room, 'humidity', data, weather));
   details.hidden = false;
   renderStatus();
 }
@@ -90,3 +91,5 @@ refreshHistory();
 setInterval(refreshHistory, 60_000);
 setInterval(renderStatus, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshHistory(); });
+
+window.addEventListener('weather-updated', renderCharts);

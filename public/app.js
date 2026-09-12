@@ -2,13 +2,36 @@ const roomsEl = document.querySelector("#rooms");
 const updatedEl = document.querySelector("#updated");
 const errorEl = document.querySelector("#error");
 
+let outside;
+let outsideFresh = false;
+let indoorsAt = 0;
+function renderComparisons() {
+  for (const el of roomsEl.querySelectorAll('.outdoor-comparison')) {
+    const temperature = Number(el.dataset.temperature);
+    const usable = outsideFresh && Date.now() - indoorsAt <= 90_000 && Number.isFinite(temperature) &&
+      el.dataset.online === 'true' && Number.isFinite(outside?.current?.temperature);
+    el.hidden = !usable;
+    if (usable) {
+      const delta = temperature - outside.current.temperature;
+      el.textContent = Math.abs(delta) < 0.05 ? 'Same as outside estimate' :
+        `${Math.abs(delta).toFixed(1)}°C ${delta > 0 ? 'warmer' : 'cooler'} than outside estimate`;
+    }
+  }
+}
+window.addEventListener('weather-updated', event => {
+  outside = event.detail.weather; outsideFresh = event.detail.fresh; renderComparisons();
+});
+setInterval(renderComparisons, 30_000);
+
 async function refresh() {
   try {
     const response = await fetch("/api/readings", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
+    indoorsAt = Date.parse(data.updated);
     renderRooms(data.rooms ?? []);
+    renderComparisons();
 
     const updated = new Date(data.updated);
     updatedEl.textContent = `Updated ${updated.toLocaleTimeString([], {
@@ -20,6 +43,7 @@ async function refresh() {
     errorEl.hidden = true;
   } catch (error) {
     console.error(error);
+    indoorsAt = 0; renderComparisons();
     errorEl.textContent = "Unable to refresh the Govee readings right now.";
     errorEl.hidden = false;
   }
@@ -65,7 +89,11 @@ function renderRooms(rooms) {
       shortcut.textContent = "View 24-hour history";
       shortcut.setAttribute("aria-label", `View ${room.name} history`);
       shortcut.setAttribute("aria-controls", "history-section");
-      card.append(shortcut);
+      const comparison = document.createElement('p');
+      comparison.className = 'outdoor-comparison'; comparison.hidden = true;
+      comparison.dataset.temperature = Number.isFinite(room.temperature) ? String(room.temperature) : 'NaN';
+      comparison.dataset.online = String(room.online === true);
+      card.append(comparison, shortcut);
       return card;
     })
   );
