@@ -83,9 +83,9 @@ The collector calls Govee directly, independently of browser traffic and the liv
 
 The response contains `from`, `to`, `intervalMs`, `staleAfterMs` and `rooms`. All times and durations are milliseconds. Each room has an opaque `id`, its latest `name`, `lastCollectedAt`, `lastValidAt` (nullable), and `points`. Each point includes `scheduledAt`, `collectedAt`, `temperature` (Celsius), `humidity` (percent), and nullable boolean `online`. A valid reading means online with both metrics present. Rooms without samples in the window remain listed, so a stopped collector is not hidden.
 
-Each current-reading card links directly to its room’s history, with keyboard support and reduced-motion-aware scrolling. Live and history responses share an opaque room key, so matching does not depend on room names. Freshness status sits beside the history heading, with detailed timestamps in an expandable Collection details section. The dashboard retains the current-reading cards and adds a room selector with separate temperature and humidity charts. Charts use local time and actual collection timestamps; lines break at missing scheduled slots, offline readings or a missing metric. Valid zero readings and isolated points are preserved. Expandable tables provide exact values for touch, keyboard and screen-reader users. Last collection and last valid reading times are shown separately; a ten-minute threshold marks stale data. History refreshes every minute, with freshness re-evaluated between requests and old data clearly labelled if refresh fails.
+Each current-reading card links directly to its room’s history, with keyboard support and reduced-motion-aware scrolling. Live and history responses share an opaque room key, so matching does not depend on room names. Freshness status sits beside the history heading, with detailed timestamps in an expandable Collection details section. The dashboard retains the current-reading cards and adds a room selector with separate temperature and humidity charts. Charts and tables are ordered by actual collection time, with scheduled time breaking ties. The rolling window and latest collection/valid-reading metadata also use collection time. Charts use local time; lines break at missing or replayed scheduled slots, non-increasing collection times, collection gaps over ten minutes, offline readings or a missing metric. Valid zero readings and isolated points are preserved. Expandable tables provide exact values for touch, keyboard and screen-reader users. Last collection and last valid reading times are shown separately; a ten-minute threshold marks stale data. History refreshes every minute, with freshness re-evaluated between requests and old data clearly labelled if refresh fails.
 
-Device/time queries use the existing primary key. No new migration or provisioning is required for this feature. Listing devices scans the existing index, and finding the last valid reading can scan backwards through a device's history; a compact device-summary table may be useful if retention grows substantially. There is currently no retention limit.
+Migration `0002_collection_time_index.sql` adds an index on `(device_id, collected_at, scheduled_at)` for history windows and latest-reading lookups. Apply it with `npx wrangler d1 migrations apply home-climate-history --remote` before rolling out this update. It adds only an index and preserves existing readings. Queries remain correct without the index, but may scan and sort more data. Listing devices scans the existing index, and finding the last valid reading can scan backwards through a device's history; a compact device-summary table may be useful if retention grows substantially. There is currently no retention limit.
 
 ### Tests
 
@@ -93,7 +93,7 @@ Device/time queries use the existing primary key. No new migration or provisioni
 npm test
 ```
 
-Tests need no API key, Cloudflare account or installed dependencies. They mock Govee HTTP responses and execute the actual migration, collector and history SQL in an in-memory SQLite database through a small D1 adapter. GitHub Actions runs them on pull requests. They also cover chart gaps and freshness logic. They do not validate browser rendering, Cloudflare deployment or a live Govee connection.
+Tests need no API key, Cloudflare account or installed dependencies. They mock Govee HTTP responses and execute the actual migration, collector and history SQL in an in-memory SQLite database through a small D1 adapter. GitHub Actions runs them on pull requests. They also cover delayed/replayed slots, collection-time window boundaries, latest valid versus incomplete readings, indexed history queries, chart gaps and freshness logic. They do not validate browser rendering, Cloudflare deployment or a live Govee connection.
 
 ### Enable collection in production
 
@@ -105,7 +105,7 @@ Tests need no API key, Cloudflare account or installed dependencies. They mock G
    ```
 
 2. The production `d1_databases` binding is already enabled. For a new installation, replace its `database_id` with your returned UUID. Keep the binding name `DB`. Do not deploy a placeholder ID.
-3. For a new database, apply the migration before deploying the collector. The production table was created manually using the same schema, so this step can also be run later to register migration `0001_readings.sql` in Wrangler's migration tracking:
+3. Apply pending migrations before deploying, for both new and existing databases. The production table was created manually using the same schema, so this step can also be run later to register migration `0001_readings.sql` in Wrangler's migration tracking:
 
    ```bash
    npx wrangler d1 migrations apply home-climate-history --remote

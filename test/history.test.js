@@ -11,6 +11,7 @@ const slot = 300_000;
 function database(t) {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0001_readings.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_collection_time_index.sql', import.meta.url), 'utf8'));
   t.after(() => sqlite.close());
   return { sqlite, prepare(sql) {
     const statement = sqlite.prepare(sql);
@@ -19,9 +20,9 @@ function database(t) {
       async first() { return statement.get(...args) ?? null; },
     });
     return { ...bound([]), bind: (...args) => bound(args) };
-  }, insert(id, time, temp = 22, humidity = 45, online = 1, name = 'Office') {
+  }, insert(id, time, temp = 22, humidity = 45, online = 1, name = 'Office', collectedAt = time + 1000) {
     sqlite.prepare('INSERT INTO readings VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(id, time, time + 1000, name, temp, humidity, online);
+      .run(id, time, collectedAt, name, temp, humidity, online);
   } };
 }
 
@@ -98,10 +99,59 @@ test('freshness ages loaded data and flags a new incomplete reading', () => {
   assert.equal(freshness(room, now, 600_000), 'Latest reading is unavailable or incomplete');
 });
 
-test('device/time range query uses the existing primary-key index', async t => {
+test('collection-time range query uses the new index without a temporary sort', async t => {
   const DB = database(t);
   const plan = DB.sqlite.prepare(`EXPLAIN QUERY PLAN SELECT * FROM readings
-    WHERE device_id = ? AND scheduled_at >= ? AND scheduled_at <= ? ORDER BY scheduled_at`)
+    WHERE device_id = ? AND collected_at >= ? AND collected_at <= ? ORDER BY collected_at, scheduled_at`)
     .all('sensor', now - 86_400_000, now);
-  assert.match(plan.map(r => r.detail).join(' '), /USING INDEX sqlite_autoindex_readings_1/);
+  const detail = plan.map(r => r.detail).join(' ');
+  assert.match(detail, /USING INDEX readings_device_collected_at/);
+  assert.doesNotMatch(detail, /TEMP B-TREE/);
+});
+
+test('recent collection from a two-day-old slot appears in the history window', async t => {
+  const DB = database(t);
+  DB.insert('sensor', now - 2 * 86_400_000, 23, 46, 1, 'Office', now - 60_000);
+  const { rooms: [room] } = await readHistory(DB, now);
+  assert.equal(room.points.length, 1);
+  assert.equal(room.points[0].collectedAt, now - 60_000);
+  assert.equal(room.points[0].scheduledAt, now - 2 * 86_400_000);
+});
+
+test('metadata and points follow collection order when older slots are replayed', async t => {
+  const DB = database(t);
+  DB.insert('sensor', now - 2 * slot, 22, 45, 1, 'Old name', now - 2 * slot + 1000);
+  DB.insert('sensor', now - 4 * slot, 23, 46, 1, 'New name', now - 60_000);
+  let room = (await readHistory(DB, now)).rooms[0];
+  assert.equal(room.name, 'New name');
+  assert.equal(room.lastCollectedAt, now - 60_000);
+  assert.equal(room.lastValidAt, now - 60_000);
+  assert.deepEqual(room.points.map(p => p.collectedAt), [now - 2 * slot + 1000, now - 60_000]);
+  DB.insert('sensor', now - 3 * slot, 24, null, 1, 'New name', now - 30_000);
+  room = (await readHistory(DB, now)).rooms[0];
+  assert.equal(room.lastCollectedAt, now - 30_000);
+  assert.equal(room.lastValidAt, now - 60_000);
+  assert.equal(freshness(room, now, 600_000), 'Latest reading is unavailable or incomplete');
+});
+
+test('collection-time boundaries are inclusive and future collections cannot supply metadata', async t => {
+  const DB = database(t);
+  const from = now - 86_400_000;
+  DB.insert('sensor', from - 3 * slot, 21, 45, 1, 'Before', from - 1);
+  DB.insert('sensor', from - 2 * slot, 22, 45, 1, 'Start', from);
+  DB.insert('sensor', from - slot, 23, 45, 1, 'End', now);
+  DB.insert('sensor', now - slot, 24, 45, 1, 'Future', now + 1);
+  const { rooms: [room] } = await readHistory(DB, now);
+  assert.deepEqual(room.points.map(p => p.collectedAt), [from, now]);
+  assert.equal(room.name, 'End');
+  assert.equal(room.lastCollectedAt, now);
+  assert.equal(room.lastValidAt, now);
+});
+
+test('chart breaks on backwards scheduled slots and long collection gaps', () => {
+  const p = (scheduledAt, collectedAt) => ({ scheduledAt, collectedAt, temperature: 22, online: true });
+  const replay = [p(3 * slot, 4 * slot), p(slot, 5 * slot), p(2 * slot, 6 * slot)];
+  assert.deepEqual(segments(replay, 'temperature', slot).map(run => run.length), [1, 2]);
+  const delayed = [p(slot, slot), p(2 * slot, 8 * slot)];
+  assert.deepEqual(segments(delayed, 'temperature', slot).map(run => run.length), [1, 1]);
 });
