@@ -1,12 +1,14 @@
-// Split on missing cron slots as well as metric-specific invalid readings.
+// Points arrive in collection order. Break on replayed/missing slots and invalid readings.
 export function segments(points, metric, intervalMs) {
   const result = [];
   let run = [];
   let previous;
   for (const point of points) {
     const valid = point.online === true && Number.isFinite(point[metric]);
-    if (!valid || (previous && (point.scheduledAt - previous.scheduledAt > intervalMs ||
-        point.collectedAt <= previous.collectedAt))) {
+    // Allow fetch-time jitter, but don't connect across a long collection outage.
+    if (!valid || (previous && (point.scheduledAt - previous.scheduledAt !== intervalMs ||
+        point.collectedAt <= previous.collectedAt ||
+        point.collectedAt - previous.collectedAt > 2 * intervalMs))) {
       if (run.length) result.push(run);
       run = [];
     }

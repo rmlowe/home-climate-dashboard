@@ -1,30 +1,30 @@
 const DAY = 86_400_000;
 const SLOT = 300_000;
 
-// Fixed 24-hour window. Device/time lookups use the existing primary key.
+// Fetch time defines the window and chronology; scheduled slots identify cron gaps.
 export async function readHistory(DB, now = Date.now()) {
   const from = now - DAY;
   const { results: devices } = await DB.prepare('SELECT DISTINCT device_id FROM readings').all();
   const rooms = await Promise.all(devices.map(async ({ device_id }) => {
     const latest = await DB.prepare(`SELECT device_name, collected_at FROM readings
-      WHERE device_id = ? AND scheduled_at <= ? ORDER BY scheduled_at DESC LIMIT 1`)
+      WHERE device_id = ? AND collected_at <= ? ORDER BY collected_at DESC, scheduled_at DESC LIMIT 1`)
       .bind(device_id, now).first();
     if (!latest) return null;
     const valid = await DB.prepare(`SELECT collected_at FROM readings WHERE device_id = ?
-      AND scheduled_at <= ? AND online = 1 AND temperature_c IS NOT NULL
-      AND humidity_percent IS NOT NULL ORDER BY scheduled_at DESC LIMIT 1`)
+      AND collected_at <= ? AND online = 1 AND temperature_c IS NOT NULL
+      AND humidity_percent IS NOT NULL ORDER BY collected_at DESC, scheduled_at DESC LIMIT 1`)
       .bind(device_id, now).first();
     const { results } = await DB.prepare(`SELECT scheduled_at, collected_at, temperature_c,
-      humidity_percent, online FROM readings WHERE device_id = ? AND scheduled_at >= ?
-      AND scheduled_at <= ? ORDER BY scheduled_at`)
-      .bind(device_id, Math.floor(from / SLOT) * SLOT, now).all();
+      humidity_percent, online FROM readings WHERE device_id = ? AND collected_at >= ?
+      AND collected_at <= ? ORDER BY collected_at, scheduled_at`)
+      .bind(device_id, from, now).all();
     // An opaque stable key supports duplicate names/renaming without exposing Govee IDs.
     return {
       id: await roomKey(device_id),
       name: latest.device_name,
       lastCollectedAt: latest.collected_at,
       lastValidAt: valid?.collected_at ?? null,
-      points: results.filter(r => r.collected_at >= from && r.collected_at <= now).map(r => ({
+      points: results.map(r => ({
         scheduledAt: r.scheduled_at, collectedAt: r.collected_at,
         temperature: r.online === 1 ? r.temperature_c : null,
         humidity: r.online === 1 ? r.humidity_percent : null,
