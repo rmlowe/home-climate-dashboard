@@ -1,15 +1,23 @@
 import { discoverThermometers, readThermometer } from "./govee.js";
 import { collectReadings } from "./collector.js";
 import { handleHistory, roomKey } from "./history.js";
+import { readWeather, handleWeather } from "./weather.js";
 const CACHE_TTL_SECONDS = 30;
 
 export default {
   async scheduled(controller, env) {
-    await collectReadings(env, controller.scheduledTime);
+    const jobs = [collectReadings(env, controller.scheduledTime)];
+    if (env.WEATHER_LATITUDE != null && env.WEATHER_LONGITUDE != null &&
+        Math.floor(controller.scheduledTime / 300_000) % 3 === 0) jobs.push(readWeather(env));
+    const results = await Promise.allSettled(jobs);
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
   },
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/weather") return handleWeather(request, env);
 
     if (url.pathname === "/api/history") return handleHistory(request, env);
 

@@ -17,7 +17,10 @@
   }],
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
-    "GOVEE_TEMPERATURE_UNIT": "fahrenheit"
+    "GOVEE_TEMPERATURE_UNIT": "fahrenheit",
+    "WEATHER_LATITUDE": "51.61",
+    "WEATHER_LONGITUDE": "-0.21",
+    "WEATHER_LOCATION_NAME": "Mill Hill East"
   },
   "secrets": {
     "required": ["GOVEE_API_KEY"]

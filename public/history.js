@@ -1,4 +1,5 @@
 import { chart, freshness } from './chart.js';
+import { weather } from './weather.js';
 
 const select = document.querySelector('#history-room');
 const status = document.querySelector('#history-status');
@@ -8,6 +9,7 @@ const error = document.querySelector('#history-error');
 let data;
 let busy = false;
 let requestedRoom;
+let renderedRoom;
 const details = document.querySelector('#history-details');
 
 function renderStatus() {
@@ -22,7 +24,16 @@ function renderStatus() {
 function renderCharts() {
   const room = data?.rooms.find(r => r.id === select.value);
   if (!room) return;
-  charts.replaceChildren(chart(room, 'temperature', data), chart(room, 'humidity', data));
+  // Preserve disclosures and keyboard focus through both history and weather refreshes.
+  const previous = renderedRoom === room.id ? [...charts.querySelectorAll('details')].map(detail => ({
+    open: detail.open, focused: detail.querySelector('summary') === document.activeElement,
+  })) : [];
+  charts.replaceChildren(chart(room, 'temperature', data, weather), chart(room, 'humidity', data, weather));
+  [...charts.querySelectorAll('details')].forEach((detail, index) => {
+    detail.open = previous[index]?.open ?? false;
+    if (previous[index]?.focused) detail.querySelector('summary').focus({ preventScroll: true });
+  });
+  renderedRoom = room.id;
   details.hidden = false;
   renderStatus();
 }
@@ -90,3 +101,5 @@ refreshHistory();
 setInterval(refreshHistory, 60_000);
 setInterval(renderStatus, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshHistory(); });
+
+window.addEventListener('weather-updated', renderCharts);

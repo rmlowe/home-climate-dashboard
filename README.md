@@ -87,6 +87,30 @@ Each current-reading card links directly to its room’s history, with keyboard 
 
 Migration `0002_collection_time_index.sql` adds an index on `(device_id, collected_at, scheduled_at)` for history windows and latest-reading lookups. Apply it with `npx wrangler d1 migrations apply home-climate-history --remote` before rolling out this update. It adds only an index and preserves existing readings. Queries remain correct without the index, but may scan and sort more data. Listing devices scans the existing index, and finding the last valid reading can scan backwards through a device's history; a compact device-summary table may be useful if retention grows substantially. There is currently no retention limit.
 
+### Outdoor weather comparison
+
+The dashboard shows an **Outside · local estimate** summary and green dashed outdoor lines on both 24-hour charts. Room cards show the temperature difference only while indoor and outdoor data are fresh. These are modelled local conditions from [Open-Meteo](https://open-meteo.com/), not balcony measurements. Weather data is attributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The free endpoint is intended for non-commercial use; see [API documentation](https://open-meteo.com/en/docs) and [terms](https://open-meteo.com/en/terms).
+
+`WEATHER_LATITUDE`, `WEATHER_LONGITUDE` and `WEATHER_LOCATION_NAME` configure the location in `wrangler.jsonc`. Defaults are approximate Mill Hill East coordinates (51.61, -0.21), not a precise home address. The Worker sends these coordinates to Open-Meteo; no Govee credentials or sensor identifiers are sent. No weather API key is needed.
+
+`GET /api/weather` returns the current estimate and rolling 24-hour hourly series. `validAt` is the weather's applicable time; `fetchedAt` is when the Worker requested the snapshot. Both are UTC Unix milliseconds. Future hourly forecasts are excluded from the comparison. Missing metrics remain null and create chart gaps. Freshness ages independently of page refresh: snapshots older than 45 minutes or current estimates older than one hour are marked delayed. Weather uses its own refresh and error display, so an outage does not hide indoor readings or history.
+
+The existing five-minute cron also checks weather every third slot. Dashboard requests can populate an empty cache or refresh an overdue one, so preview URLs work without their own cron. A D1 attempt lease limits upstream requests to at most one per 15 minutes per location across cron and viewers, including after failures (normally up to 96/day). Failed refreshes retain the previous successful payload. The API is private/no-store and the service worker excludes it.
+
+This stores a bounded snapshot of recent hourly estimates, **not a permanent outdoor archive**. Later model updates may revise the recent series. The first successful request supplies the preceding day immediately; indoor history remains unchanged.
+
+Before previewing or deploying, apply migration `0003_weather_cache.sql` using the normal migration command. On mobile, run this directly in **D1 → home-climate-history → Console**:
+
+```sql
+CREATE TABLE IF NOT EXISTS weather_cache (
+  location_key TEXT PRIMARY KEY,
+  attempted_at INTEGER NOT NULL,
+  payload TEXT
+);
+```
+
+Verify with `PRAGMA table_info('weather_cache');`. This only creates a separate cache table. Running the Wrangler migration later is safe because it also uses `IF NOT EXISTS`. Until the table exists, outdoor data returns 503 and indoor functionality continues normally. Preview and production share the configured database and weather cache.
+
 ### Tests
 
 ```bash
