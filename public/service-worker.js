@@ -1,4 +1,4 @@
-const CACHE_NAME = "home-climate-static-v5";
+const CACHE_NAME = "home-climate-static-v6";
 const STATIC_ASSETS = [
   "/style.css",
   "/app.js",

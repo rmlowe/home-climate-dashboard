@@ -76,7 +76,7 @@ export function chart(room, metric, data, weather) {
   const x = t => 58 + (t - data.from) / (data.to - data.from) * (right - 58);
   const y = v => 184 - (v - low) / (high - low) * 160;
   const svg = svgNode('svg', { viewBox: `0 0 ${width} 226`, role: 'img',
-    'aria-label': `${room.name} and outside estimate: ${label} over the last 24 hours. Minimum ${min.toFixed(1)}${unit}, maximum ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
+    'aria-label': `${room.name} and outside estimate: ${label} over the last 24 hours. Combined range: ${min.toFixed(1)}${unit} to ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
   for (let i = 0; i <= 4; i++) {
     const value = low + (high - low) * i / 4;
     svg.append(svgNode('line', { x1: 58, x2: right, y1: y(value), y2: y(value), class: 'grid-line' }));
@@ -103,8 +103,13 @@ export function chart(room, metric, data, weather) {
   // A native table is usable with keyboard, touch and screen readers.
   const details = document.createElement('details');
   const summary = document.createElement('summary');
-  summary.textContent = `View readings · Min ${min.toFixed(1)}${unit} / Max ${max.toFixed(1)}${unit}`;
-  details.append(summary);
+  summary.textContent = 'View readings and ranges';
+  const ranges = document.createElement('p');
+  ranges.textContent = series.map(item => {
+    const values = item.runs.flat().map(point => point[metric]);
+    return values.length ? `${item.name}: Min ${Math.min(...values).toFixed(1)}${unit} / Max ${Math.max(...values).toFixed(1)}${unit}` : `${item.name}: no valid readings`;
+  }).join(' · ');
+  details.append(summary, ranges);
   const table = document.createElement('table');
   const head = table.createTHead().insertRow();
   for (const text of ['Source', 'Time (local)', `${label} (${unit})`]) {
