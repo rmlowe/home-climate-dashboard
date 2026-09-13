@@ -100,12 +100,16 @@ test('weather route validates requests and fails separately from sensor storage'
 });
 
 test('scheduled weather still runs when Govee fails', async t => {
+  // Keep the request start and mock weather time on the same deterministic clock.
+  t.mock.method(Date, 'now', () => now);
   const env = environment(t);
   const original = globalThis.fetch; let weatherCalls = 0;
-  globalThis.fetch = async () => { weatherCalls++; return Response.json(fixture(Date.now())); };
+  globalThis.fetch = async () => { weatherCalls++; return Response.json(fixture(now)); };
   t.after(() => { globalThis.fetch = original; });
   await assert.rejects(worker.scheduled({ scheduledTime: now }, env));
   assert.equal(weatherCalls, 1);
   const cached = await readWeather(env);
   assert.equal(cached.current.temperature, 18);
+  assert.equal(cached.current.validAt, now);
+  assert.equal(cached.fetchedAt, now);
 });
