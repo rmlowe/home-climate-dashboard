@@ -1,9 +1,10 @@
-const CACHE_NAME = "home-climate-static-v6";
+const CACHE_NAME = "home-climate-static-v7";
 const STATIC_ASSETS = [
   "/style.css",
   "/app.js",
   "/history.js",
   "/chart.js",
+  "/daily.js",
   "/weather.js",
   "/weather-model.js",
   "/manifest.webmanifest",

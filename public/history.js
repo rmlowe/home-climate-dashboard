@@ -1,6 +1,8 @@
 import { chart, freshness } from './chart.js';
+import { dailyTable } from './daily.js';
 import { weather } from './weather.js';
 
+const rangeSelect = document.querySelector('#history-range');
 const select = document.querySelector('#history-room');
 const status = document.querySelector('#history-status');
 const times = document.querySelector('#history-freshness');
@@ -28,7 +30,7 @@ function renderCharts() {
   const previous = renderedRoom === room.id ? [...charts.querySelectorAll('details')].map(detail => ({
     open: detail.open, focused: detail.querySelector('summary') === document.activeElement,
   })) : [];
-  charts.replaceChildren(chart(room, 'temperature', data, weather), chart(room, 'humidity', data, weather));
+  charts.replaceChildren(chart(room, 'temperature', data, weather), chart(room, 'humidity', data, weather), dailyTable(room, data));
   [...charts.querySelectorAll('details')].forEach((detail, index) => {
     detail.open = previous[index]?.open ?? false;
     if (previous[index]?.focused) detail.querySelector('summary').focus({ preventScroll: true });
@@ -40,11 +42,14 @@ function renderCharts() {
 async function refreshHistory() {
   if (busy) return;
   busy = true;
+  const range = rangeSelect.value;
   try {
-    const response = await fetch('/api/history', { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+    const response = await fetch(`/api/history?range=${range}`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const next = await response.json();
     if (!Array.isArray(next.rooms)) throw new Error('Invalid history response');
+    if (range !== rangeSelect.value) return;
+    document.querySelector('#history-heading').textContent = range === '7d' ? 'Last 7 days' : 'Last 24 hours';
     const selected = select.value;
     data = next;
     select.replaceChildren(...data.rooms.map(room => {
@@ -65,12 +70,16 @@ async function refreshHistory() {
     } else renderCharts();
     if (requestedRoom) showMissingRoom();
   } catch (e) {
+    if (range !== rangeSelect.value) return;
     console.error(e);
     error.textContent = data ? 'Unable to refresh history. Showing previously loaded data.' : 'Unable to load history. Retrying automatically.';
     error.hidden = false;
     if (!data) status.textContent = '';
     renderStatus();
-  } finally { busy = false; }
+  } finally {
+    busy = false;
+    if (range !== rangeSelect.value) refreshHistory();
+  }
 }
 function showMissingRoom() {
   select.value = '';
@@ -95,6 +104,14 @@ document.querySelector('#rooms').addEventListener('click', event => {
     behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
     block: 'start',
   });
+});
+rangeSelect.addEventListener('change', () => {
+  requestedRoom = select.value || requestedRoom;
+  data = undefined;
+  charts.replaceChildren(); details.hidden = true; error.hidden = true;
+  document.querySelector('#history-heading').textContent = rangeSelect.value === '7d' ? 'Last 7 days' : 'Last 24 hours';
+  status.textContent = 'Loading history…';
+  refreshHistory();
 });
 select.addEventListener('change', () => { requestedRoom = undefined; renderCharts(); });
 refreshHistory();

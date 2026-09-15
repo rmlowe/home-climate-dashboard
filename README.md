@@ -79,7 +79,7 @@ The collector calls Govee directly, independently of browser traffic and the liv
 
 ### History API and charts
 
-`GET /api/history` returns a fixed rolling 24-hour window. No query parameters are accepted (400); other methods return 405. Unconfigured or unavailable storage returns 503. Empty storage returns 200 with an empty `rooms` array. Responses use `Cache-Control: private, no-store` and are excluded from the service worker cache.
+`GET /api/history` returns a rolling 24-hour window by default. `?range=24h` and `?range=7d` select the supported windows. Unknown parameters, duplicate ranges and unsupported values return 400; other methods return 405. Unconfigured or unavailable storage returns 503. Empty storage returns 200 with an empty `rooms` array. Responses use `Cache-Control: private, no-store` and are excluded from the service worker cache.
 
 The response contains `from`, `to`, `intervalMs`, `staleAfterMs` and `rooms`. All times and durations are milliseconds. Each room has an opaque `id`, its latest `name`, `lastCollectedAt`, `lastValidAt` (nullable), and `points`. Each point includes `scheduledAt`, `collectedAt`, `temperature` (Celsius), `humidity` (percent), and nullable boolean `online`. A valid reading means online with both metrics present. Rooms without samples in the window remain listed, so a stopped collector is not hidden.
 
@@ -163,4 +163,4 @@ References: [D1 setup](https://developers.cloudflare.com/d1/get-started/), [D1 m
 
 ## Current scope
 
-The dashboard shows current readings and the last 24 hours of collected history, with per-chart min/max values and freshness status. Future additions could include longer time ranges, outside conditions, comfort indicators and alerts.
+The dashboard shows current readings and selectable 24-hour or seven-day indoor history, with per-chart min/max values and freshness status. Daily indoor temperature summaries use browser-local calendar days, including daylight-saving transitions. Coverage counts distinct five-minute collection-time periods with an online, finite temperature, relative to the portion of each day inside the selected window. Missing days remain visible; partial days are labelled. Min/max values describe available samples, not guaranteed daily extremes. Outdoor overlays retain their recent 24-hour coverage and are labelled accordingly in the seven-day view. No database migration is needed for these longer indoor views. Future additions could include longer outdoor history, overnight cooling summaries, comfort indicators and alerts.

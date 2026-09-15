@@ -2,8 +2,9 @@ const DAY = 86_400_000;
 const SLOT = 300_000;
 
 // Fetch time defines the window and chronology; scheduled slots identify cron gaps.
-export async function readHistory(DB, now = Date.now()) {
-  const from = now - DAY;
+export async function readHistory(DB, now = Date.now(), range = '24h') {
+  if (!['24h', '7d'].includes(range)) throw new Error('Unsupported history range');
+  const from = now - DAY * (range === '7d' ? 7 : 1);
   const { results: devices } = await DB.prepare('SELECT DISTINCT device_id FROM readings').all();
   const rooms = await Promise.all(devices.map(async ({ device_id }) => {
     const latest = await DB.prepare(`SELECT device_name, collected_at FROM readings
@@ -40,12 +41,14 @@ export async function handleHistory(request, env) {
   const headers = { 'Cache-Control': 'private, no-store' };
   if (request.method !== 'GET') return Response.json({ error: 'Method not allowed' },
     { status: 405, headers: { ...headers, Allow: 'GET' } });
-  if ([...new URL(request.url).searchParams].length) return Response.json(
-    { error: 'History supports a fixed 24-hour window; query parameters are not supported' },
+  const params = new URL(request.url).searchParams;
+  const range = params.get('range') ?? '24h';
+  if ([...params.keys()].some(key => key !== 'range') || params.getAll('range').length > 1 || !['24h', '7d'].includes(range)) return Response.json(
+    { error: 'Supported history ranges are 24h and 7d; other parameters are not supported' },
     { status: 400, headers });
   if (!env.DB) return Response.json({ error: 'History storage is not configured' }, { status: 503, headers });
   try {
-    return Response.json(await readHistory(env.DB), { headers });
+    return Response.json(await readHistory(env.DB, Date.now(), range), { headers });
   } catch (error) {
     console.error('Unable to read history', error);
     return Response.json({ error: 'Unable to retrieve history' }, { status: 503, headers });

@@ -41,6 +41,7 @@ function svgNode(tag, attributes = {}, text) {
 }
 
 export function chart(room, metric, data, weather) {
+  const period = data.to - data.from > 86_400_000 ? '7 days' : '24 hours';
   const unit = metric === 'temperature' ? '°C' : '%';
   const label = metric === 'temperature' ? 'Temperature' : 'Relative humidity';
   const figure = document.createElement('figure');
@@ -58,11 +59,12 @@ export function chart(room, metric, data, weather) {
   const legend = document.createElement('p');
   legend.className = 'chart-legend';
   legend.textContent = `${room.name}: solid · Outside estimate: green dashed` +
+    (period === '7 days' && outsideRuns.length ? ' · Outdoor coverage: recent 24 hours only' : '') +
     (!outsideRuns.length ? ' · Outdoor history unavailable' : !weatherFresh(weather) ? ' · Outdoor update delayed' : '');
   figure.append(legend);
   if (!points.length) {
     const empty = document.createElement('p');
-    empty.textContent = `No valid ${label.toLowerCase()} readings in the last 24 hours.`;
+    empty.textContent = `No valid ${label.toLowerCase()} readings in the last ${period}.`;
     figure.append(empty);
     return figure;
   }
@@ -76,7 +78,7 @@ export function chart(room, metric, data, weather) {
   const x = t => 58 + (t - data.from) / (data.to - data.from) * (right - 58);
   const y = v => 184 - (v - low) / (high - low) * 160;
   const svg = svgNode('svg', { viewBox: `0 0 ${width} 226`, role: 'img',
-    'aria-label': `${room.name} and outside estimate: ${label} over the last 24 hours. Combined range: ${min.toFixed(1)}${unit} to ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
+    'aria-label': `${room.name} and outside estimate: ${label} over the last ${period}. Combined range: ${min.toFixed(1)}${unit} to ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
   for (let i = 0; i <= 4; i++) {
     const value = low + (high - low) * i / 4;
     svg.append(svgNode('line', { x1: 58, x2: right, y1: y(value), y2: y(value), class: 'grid-line' }));
@@ -86,7 +88,7 @@ export function chart(room, metric, data, weather) {
   for (let i = 0; i <= ticks; i++) {
     const time = data.from + (data.to - data.from) * i / ticks;
     svg.append(svgNode('text', { x: x(time), y: 214, 'text-anchor': i === 0 ? 'start' : i === ticks ? 'end' : 'middle' },
-      new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })));
+      (period === '7 days' ? new Date(time).toLocaleDateString([], { day: 'numeric', month: 'short' }) : new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))));
   }
   for (const item of series) for (const run of item.runs) {
     svg.append(svgNode('polyline', { points: run.map(p => `${x(p.collectedAt)},${y(p[metric])}`).join(' '), class: 'series-line' + item.className }));
