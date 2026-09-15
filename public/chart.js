@@ -21,6 +21,23 @@ export function segments(points, metric, intervalMs) {
   return result;
 }
 
+// Reduce each uninterrupted run independently; keep endpoints and bucket extrema.
+export function decimate(run, metric, from, to, pixels) {
+  const buckets = new Map();
+  for (let i = 0; i < run.length; i++) {
+    const key = Math.floor((run[i].collectedAt - from) / (to - from) * pixels / 4);
+    const bucket = buckets.get(key);
+    if (!bucket) buckets.set(key, { first: i, last: i, min: i, max: i });
+    else {
+      bucket.last = i;
+      if (run[i][metric] < run[bucket.min][metric]) bucket.min = i;
+      if (run[i][metric] > run[bucket.max][metric]) bucket.max = i;
+    }
+  }
+  return [...new Set([...buckets.values()].flatMap(b => [b.first, b.min, b.max, b.last]))]
+    .sort((a, b) => a - b).map(i => run[i]);
+}
+
 export function freshness(room, now, staleAfterMs) {
   if (room.lastCollectedAt == null) return 'No collection recorded';
   if (now - room.lastCollectedAt > staleAfterMs) return 'Collection is stale';
@@ -40,7 +57,8 @@ function svgNode(tag, attributes = {}, text) {
   return node;
 }
 
-export function chart(room, metric, data, weather) {
+export function chart(room, metric, data, weather, state = {}) {
+  const period = data.to - data.from > 86_400_000 ? '7 days' : '24 hours';
   const unit = metric === 'temperature' ? '°C' : '%';
   const label = metric === 'temperature' ? 'Temperature' : 'Relative humidity';
   const figure = document.createElement('figure');
@@ -58,11 +76,12 @@ export function chart(room, metric, data, weather) {
   const legend = document.createElement('p');
   legend.className = 'chart-legend';
   legend.textContent = `${room.name}: solid · Outside estimate: green dashed` +
+    (period === '7 days' && outsideRuns.length ? ' · Outdoor coverage: recent 24 hours only' : '') +
     (!outsideRuns.length ? ' · Outdoor history unavailable' : !weatherFresh(weather) ? ' · Outdoor update delayed' : '');
   figure.append(legend);
   if (!points.length) {
     const empty = document.createElement('p');
-    empty.textContent = `No valid ${label.toLowerCase()} readings in the last 24 hours.`;
+    empty.textContent = `No valid ${label.toLowerCase()} readings in the last ${period}.`;
     figure.append(empty);
     return figure;
   }
@@ -76,7 +95,7 @@ export function chart(room, metric, data, weather) {
   const x = t => 58 + (t - data.from) / (data.to - data.from) * (right - 58);
   const y = v => 184 - (v - low) / (high - low) * 160;
   const svg = svgNode('svg', { viewBox: `0 0 ${width} 226`, role: 'img',
-    'aria-label': `${room.name} and outside estimate: ${label} over the last 24 hours. Combined range: ${min.toFixed(1)}${unit} to ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
+    'aria-label': `${room.name} and outside estimate: ${label} over the last ${period}. Combined range: ${min.toFixed(1)}${unit} to ${max.toFixed(1)}${unit}. Gaps indicate unavailable readings.` });
   for (let i = 0; i <= 4; i++) {
     const value = low + (high - low) * i / 4;
     svg.append(svgNode('line', { x1: 58, x2: right, y1: y(value), y2: y(value), class: 'grid-line' }));
@@ -86,15 +105,20 @@ export function chart(room, metric, data, weather) {
   for (let i = 0; i <= ticks; i++) {
     const time = data.from + (data.to - data.from) * i / ticks;
     svg.append(svgNode('text', { x: x(time), y: 214, 'text-anchor': i === 0 ? 'start' : i === ticks ? 'end' : 'middle' },
-      new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })));
+      (period === '7 days' ? new Date(time).toLocaleDateString([], { day: 'numeric', month: 'short' }) : new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))));
   }
-  for (const item of series) for (const run of item.runs) {
-    svg.append(svgNode('polyline', { points: run.map(p => `${x(p.collectedAt)},${y(p[metric])}`).join(' '), class: 'series-line' + item.className }));
-    for (const point of run) {
-      const dot = svgNode('circle', { cx: x(point.collectedAt), cy: y(point[metric]), r: run.length === 1 ? 3 : 1.5, class: 'series-point' + item.className });
-      dot.append(svgNode('title', {}, `${item.name} · ${new Date(point.collectedAt).toLocaleString()}: ${point[metric].toFixed(1)}${unit}`));
-      svg.append(dot);
+  // One path per series, with separate subpaths so gaps never become connecting lines.
+  for (const item of series) {
+    const lines = [], dots = [];
+    for (const original of item.runs) {
+      const run = decimate(original, metric, data.from, data.to, right - 58);
+      if (run.length === 1) {
+        const px = x(run[0].collectedAt), py = y(run[0][metric]);
+        dots.push(`M ${px - 3} ${py} a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0`);
+      } else lines.push(run.map((p, i) => `${i ? 'L' : 'M'} ${x(p.collectedAt)} ${y(p[metric])}`).join(' '));
     }
+    if (lines.length) svg.append(svgNode('path', { d: lines.join(' '), class: 'series-line' + item.className }));
+    if (dots.length) svg.append(svgNode('path', { d: dots.join(' '), class: 'series-point' + item.className }));
   }
   const scroll = document.createElement('div');
   scroll.className = 'chart-scroll';
@@ -104,29 +128,65 @@ export function chart(room, metric, data, weather) {
   const details = document.createElement('details');
   const summary = document.createElement('summary');
   summary.textContent = 'View readings and ranges';
+  summary.dataset.historyFocus = 'summary';
   const ranges = document.createElement('p');
   ranges.textContent = series.map(item => {
     const values = item.runs.flat().map(point => point[metric]);
     return values.length ? `${item.name}: Min ${Math.min(...values).toFixed(1)}${unit} / Max ${Math.max(...values).toFixed(1)}${unit}` : `${item.name}: no valid readings`;
   }).join(' · ');
   details.append(summary, ranges);
-  const table = document.createElement('table');
-  const head = table.createTHead().insertRow();
-  for (const text of ['Source', 'Time (local)', `${label} (${unit})`]) {
-    const th = document.createElement('th'); th.scope = 'col'; th.textContent = text; head.append(th);
+  let rows;
+  let page = state.page ?? 0;
+  let renderedPage;
+  const content = document.createElement('div');
+  function renderPage() {
+    if (!details.open) return;
+    rows ??= [
+      ...room.points.map(p => ({ ...p, source: room.name })),
+      ...(weather?.points || []).filter(p => p.validAt >= data.from && p.validAt <= data.to)
+        .map(p => ({ ...p, collectedAt: p.validAt, online: true, source: 'Outside estimate' })),
+    ].sort((a, b) => a.collectedAt - b.collectedAt);
+    const pages = Math.max(1, Math.ceil(rows.length / 100));
+    page = Math.max(0, Math.min(page, pages - 1));
+    details.dataset.page = String(page);
+    if (renderedPage === page) return;
+    renderedPage = page;
+    const focused = content.contains(document.activeElement) ? document.activeElement.dataset.historyFocus : null;
+    const table = document.createElement('table');
+    const head = table.createTHead().insertRow();
+    for (const text of ['Source', 'Time (local)', `${label} (${unit})`]) {
+      const th = document.createElement('th'); th.scope = 'col'; th.textContent = text; head.append(th);
+    }
+    const body = table.createTBody();
+    for (const point of rows.slice(page * 100, (page + 1) * 100)) {
+      const row = body.insertRow();
+      row.insertCell().textContent = point.source;
+      row.insertCell().textContent = new Date(point.collectedAt).toLocaleString();
+      row.insertCell().textContent = point.online === true && Number.isFinite(point[metric]) ? point[metric].toFixed(1) : 'Unavailable';
+    }
+    const controls = document.createElement('div'); controls.className = 'reading-pages';
+    const status = document.createElement('span'); status.setAttribute('role', 'status');
+    status.textContent = `Page ${page + 1} of ${pages} · ${rows.length} readings`;
+    const buttons = [-1, 1].map(direction => {
+      const button = document.createElement('button'); button.type = 'button';
+      button.textContent = direction < 0 ? 'Previous' : 'Next';
+      button.dataset.historyFocus = direction < 0 ? 'previous' : 'next';
+      // Keep keyboard focus on the control at page boundaries.
+      button.setAttribute('aria-disabled', String(direction < 0 ? page === 0 : page === pages - 1));
+      button.addEventListener('click', () => {
+        if (button.getAttribute('aria-disabled') === 'true') return;
+        page += direction; renderPage();
+      });
+      return button;
+    });
+    controls.append(buttons[0], status, buttons[1]);
+    content.replaceChildren(controls, table);
+    if (focused) content.querySelector(`[data-history-focus="${focused}"]`)?.focus({ preventScroll: true });
   }
-  const body = table.createTBody();
-  const rows = [
-    ...room.points.map(p => ({ ...p, source: room.name })),
-    ...(weather?.points || []).filter(p => p.validAt >= data.from && p.validAt <= data.to)
-      .map(p => ({ ...p, collectedAt: p.validAt, online: true, source: 'Outside estimate' })),
-  ].sort((a, b) => a.collectedAt - b.collectedAt);
-  for (const point of rows) {
-    const row = body.insertRow();
-    row.insertCell().textContent = point.source;
-    row.insertCell().textContent = new Date(point.collectedAt).toLocaleString();
-    row.insertCell().textContent = point.online === true && Number.isFinite(point[metric]) ? point[metric].toFixed(1) : 'Unavailable';
-  }
-  details.append(table); figure.append(details);
+  details.append(content); figure.append(details);
+  details.dataset.page = String(page);
+  details.addEventListener('toggle', renderPage);
+  details.open = state.open ?? false;
+  renderPage();
   return figure;
 }

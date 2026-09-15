@@ -155,3 +155,25 @@ test('chart breaks on backwards scheduled slots and long collection gaps', () =>
   const delayed = [p(slot, slot), p(2 * slot, 8 * slot)];
   assert.deepEqual(segments(delayed, 'temperature', slot).map(run => run.length), [1, 1]);
 });
+
+test('seven-day history includes older readings and enforces its collection-time boundary', async t => {
+  const DB = database(t);
+  const from = now - 7 * 86_400_000;
+  DB.insert('sensor', from - slot, 10, 40, 1, 'Office', from - 1);
+  DB.insert('sensor', from, 11, 40, 1, 'Office', from);
+  DB.insert('sensor', now - 3 * 86_400_000, 12);
+  DB.insert('sensor', now - slot, 13);
+  const week = await readHistory(DB, now, '7d');
+  assert.equal(week.from, from);
+  assert.deepEqual(week.rooms[0].points.map(p => p.temperature), [11, 12, 13]);
+  assert.equal((await readHistory(DB, now)).rooms[0].points.length, 1);
+  for (const range of ['24h', '7d']) {
+    const response = await worker.fetch(new Request(`https://example.com/api/history?range=${range}`), { DB });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.to - body.from, (range === '7d' ? 7 : 1) * 86_400_000);
+  }
+  for (const query of ['range=', 'range=30d', 'range=7d&range=24h', 'range=7d&foo=1']) {
+    assert.equal((await worker.fetch(new Request(`https://example.com/api/history?${query}`), { DB })).status, 400);
+  }
+});
