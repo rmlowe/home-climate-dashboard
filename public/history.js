@@ -28,12 +28,13 @@ function renderCharts() {
   if (!room) return;
   // Preserve disclosures and keyboard focus through both history and weather refreshes.
   const previous = renderedRoom === room.id ? [...charts.querySelectorAll('details')].map(detail => ({
-    open: detail.open, focused: detail.querySelector('summary') === document.activeElement,
+    open: detail.open, page: Number(detail.dataset.page || 0),
+    focused: detail.contains(document.activeElement) ? document.activeElement.dataset.historyFocus : null,
   })) : [];
-  charts.replaceChildren(chart(room, 'temperature', data, weather), chart(room, 'humidity', data, weather), dailyTable(room, data));
+  charts.replaceChildren(chart(room, 'temperature', data, weather, previous[0]), chart(room, 'humidity', data, weather, previous[1]), dailyTable(room, data));
   [...charts.querySelectorAll('details')].forEach((detail, index) => {
-    detail.open = previous[index]?.open ?? false;
-    if (previous[index]?.focused) detail.querySelector('summary').focus({ preventScroll: true });
+    const focused = previous[index]?.focused;
+    if (focused) detail.querySelector(`[data-history-focus="${focused}"]`)?.focus({ preventScroll: true });
   });
   renderedRoom = room.id;
   details.hidden = false;
