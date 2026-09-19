@@ -189,3 +189,31 @@ test('history logs aggregate D1 row counts without exposing device IDs', async t
   assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 5, rowsRead: 35, deviceRowsRead: 14, metadataAvailable: true }]);
   assert.ok(!JSON.stringify(logs).includes('secret-device'));
 });
+
+test('failed D1 attempts are counted and reported with incomplete usage metadata', async t => {
+  const logs = [];
+  t.mock.method(console, 'log', message => logs.push(JSON.parse(message)));
+  const DB = { prepare() { return { async all() { throw new Error('D1 unavailable'); } }; } };
+  await assert.rejects(readHistory(DB, now), /D1 unavailable/);
+  assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 1, rowsRead: 0, deviceRowsRead: 0, metadataAvailable: false }]);
+});
+
+test('failure logs include other rooms queries that finish after the first rejection', async t => {
+  const logs = [];
+  t.mock.method(console, 'log', message => logs.push(JSON.parse(message)));
+  let discovery = 0;
+  const DB = { prepare(sql) {
+    const bound = args => ({ async all() {
+      if (sql.startsWith('SELECT device_id')) {
+        const results = discovery < 2 ? [{ device_id: String(discovery++) }] : [];
+        return { results, meta: { rows_read: 1 } };
+      }
+      if (args[0] === '0') throw new Error('room failed');
+      await new Promise(resolve => setImmediate(resolve));
+      return { results: sql.startsWith('SELECT device_name') ? [{ device_name: 'Room', collected_at: now }] : [], meta: { rows_read: 2 } };
+    } });
+    return { ...bound([]), bind: (...args) => bound(args) };
+  } };
+  await assert.rejects(readHistory(DB, now), /room failed/);
+  assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 7, rowsRead: 9, deviceRowsRead: 3, metadataAvailable: false }]);
+});

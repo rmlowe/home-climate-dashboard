@@ -6,8 +6,13 @@ export async function readHistory(DB, now = Date.now()) {
   const from = now - DAY;
   const usage = { event: 'history_read_usage', queries: 0, rowsRead: 0, deviceRowsRead: 0, metadataAvailable: true };
   async function query(statement, discovery = false) {
-    const result = await statement.all();
     usage.queries++;
+    let result;
+    try { result = await statement.all(); }
+    catch (error) {
+      usage.metadataAvailable = false;
+      throw error;
+    }
     const count = result.meta?.rows_read;
     if (Number.isFinite(count)) {
       usage.rowsRead += count;
@@ -28,7 +33,7 @@ export async function readHistory(DB, now = Date.now()) {
       devices.push(device);
       cursor = device.device_id;
     }
-    const rooms = await Promise.all(devices.map(async ({ device_id }) => {
+    const outcomes = await Promise.allSettled(devices.map(async ({ device_id }) => {
       const [latest] = await query(DB.prepare(`SELECT device_name, collected_at FROM readings
         WHERE device_id = ? AND collected_at <= ? ORDER BY collected_at DESC, scheduled_at DESC LIMIT 1`)
         .bind(device_id, now));
@@ -55,8 +60,14 @@ export async function readHistory(DB, now = Date.now()) {
         })),
       };
     }));
+    const failed = outcomes.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    const rooms = outcomes.map(result => result.value);
     return { from, to: now, intervalMs: SLOT, staleAfterMs: 600_000,
       rooms: rooms.filter(Boolean).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)) };
+  } catch (error) {
+    usage.metadataAvailable = false;
+    throw error;
   } finally {
     // Aggregate counts only: no sensor identifiers or readings in logs.
     console.log(JSON.stringify(usage));
