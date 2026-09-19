@@ -1,3 +1,4 @@
+import { createHistoryPoller } from './history-polling.js';
 import { chart, freshness } from './chart.js';
 import { weather } from './weather.js';
 
@@ -87,7 +88,7 @@ document.querySelector('#rooms').addEventListener('click', event => {
     renderCharts();
   } else {
     showMissingRoom();
-    refreshHistory();
+    poller.refresh();
   }
   const heading = document.querySelector('#history-heading');
   heading.focus({ preventScroll: true });
@@ -97,9 +98,10 @@ document.querySelector('#rooms').addEventListener('click', event => {
   });
 });
 select.addEventListener('change', () => { requestedRoom = undefined; renderCharts(); });
-refreshHistory();
-setInterval(refreshHistory, 60_000);
+const poller = createHistoryPoller(refreshHistory, () => document.hidden);
+poller.refresh();
+setInterval(() => poller.refresh(), 30_000);
 setInterval(renderStatus, 30_000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshHistory(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poller.refresh(); });
 
 window.addEventListener('weather-updated', renderCharts);

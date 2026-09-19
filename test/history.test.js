@@ -155,3 +155,37 @@ test('chart breaks on backwards scheduled slots and long collection gaps', () =>
   const delayed = [p(slot, slot), p(2 * slot, 8 * slot)];
   assert.deepEqual(segments(delayed, 'temperature', slot).map(run => run.length), [1, 1]);
 });
+
+test('device discovery seeks through existing indexes and retains empty IDs and stopped devices', async t => {
+  const DB = database(t);
+  for (const id of ['', 'a', 'a-longer', 'z']) {
+    for (let i = 1; i <= 1000; i++) DB.insert(id, now - 3 * 86_400_000 - i * slot);
+  }
+  const queries = [];
+  const wrapped = { prepare(sql) {
+    queries.push(sql);
+    return DB.prepare(sql);
+  } };
+  const data = await readHistory(wrapped, now);
+  assert.equal(data.rooms.length, 4);
+  assert.ok(data.rooms.every(room => room.points.length === 0));
+  assert.equal(queries.filter(sql => sql.startsWith('SELECT device_id')).length, 5);
+  assert.ok(queries.every(sql => !sql.includes('DISTINCT')));
+  const plan = DB.sqlite.prepare('EXPLAIN QUERY PLAN SELECT device_id FROM readings WHERE device_id > ? ORDER BY device_id LIMIT 1').all('a');
+  assert.match(plan.map(r => r.detail).join(' '), /SEARCH .* USING COVERING INDEX .*device_id>\?/);
+  assert.doesNotMatch(plan.map(r => r.detail).join(' '), /TEMP B-TREE/);
+});
+
+test('history logs aggregate D1 row counts without exposing device IDs', async t => {
+  const DB = database(t); DB.insert('secret-device', now - slot);
+  const wrapped = { prepare(sql) {
+    const statement = DB.prepare(sql);
+    const wrap = bound => ({ async all() { return { ...await bound.all(), meta: { rows_read: 7 } }; } });
+    return { ...wrap(statement), bind: (...args) => wrap(statement.bind(...args)) };
+  } };
+  const logs = [];
+  t.mock.method(console, 'log', message => logs.push(JSON.parse(message)));
+  await readHistory(wrapped, now);
+  assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 5, rowsRead: 35, deviceRowsRead: 14, metadataAvailable: true }]);
+  assert.ok(!JSON.stringify(logs).includes('secret-device'));
+});
