@@ -156,6 +156,28 @@ test('chart breaks on backwards scheduled slots and long collection gaps', () =>
   assert.deepEqual(segments(delayed, 'temperature', slot).map(run => run.length), [1, 1]);
 });
 
+test('seven-day history includes older readings and enforces its collection-time boundary', async t => {
+  const DB = database(t);
+  const from = now - 7 * 86_400_000;
+  DB.insert('sensor', from - slot, 10, 40, 1, 'Office', from - 1);
+  DB.insert('sensor', from, 11, 40, 1, 'Office', from);
+  DB.insert('sensor', now - 3 * 86_400_000, 12);
+  DB.insert('sensor', now - slot, 13);
+  const week = await readHistory(DB, now, '7d');
+  assert.equal(week.from, from);
+  assert.deepEqual(week.rooms[0].points.map(p => p.temperature), [11, 12, 13]);
+  assert.equal((await readHistory(DB, now)).rooms[0].points.length, 1);
+  for (const range of ['24h', '7d']) {
+    const response = await worker.fetch(new Request(`https://example.com/api/history?range=${range}`), { DB });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.to - body.from, (range === '7d' ? 7 : 1) * 86_400_000);
+  }
+  for (const query of ['range=', 'range=30d', 'range=7d&range=24h', 'range=7d&foo=1']) {
+    assert.equal((await worker.fetch(new Request(`https://example.com/api/history?${query}`), { DB })).status, 400);
+  }
+});
+
 test('device discovery seeks through existing indexes and retains empty IDs and stopped devices', async t => {
   const DB = database(t);
   for (const id of ['', 'a', 'a-longer', 'z']) {
@@ -185,8 +207,10 @@ test('history logs aggregate D1 row counts without exposing device IDs', async t
   } };
   const logs = [];
   t.mock.method(console, 'log', message => logs.push(JSON.parse(message)));
-  await readHistory(wrapped, now);
-  assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 5, rowsRead: 35, deviceRowsRead: 14, metadataAvailable: true }]);
+  for (const range of ['24h', '7d']) {
+    await readHistory(wrapped, now, range);
+    assert.deepEqual(logs.at(-1), { event: 'history_read_usage', range, queries: 5, rowsRead: 35, deviceRowsRead: 14, metadataAvailable: true });
+  }
   assert.ok(!JSON.stringify(logs).includes('secret-device'));
 });
 
@@ -195,7 +219,7 @@ test('failed D1 attempts are counted and reported with incomplete usage metadata
   t.mock.method(console, 'log', message => logs.push(JSON.parse(message)));
   const DB = { prepare() { return { async all() { throw new Error('D1 unavailable'); } }; } };
   await assert.rejects(readHistory(DB, now), /D1 unavailable/);
-  assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 1, rowsRead: 0, deviceRowsRead: 0, metadataAvailable: false }]);
+  assert.deepEqual(logs, [{ event: 'history_read_usage', range: '24h', queries: 1, rowsRead: 0, deviceRowsRead: 0, metadataAvailable: false }]);
 });
 
 test('failure logs include other rooms queries that finish after the first rejection', async t => {
@@ -215,5 +239,5 @@ test('failure logs include other rooms queries that finish after the first rejec
     return { ...bound([]), bind: (...args) => bound(args) };
   } };
   await assert.rejects(readHistory(DB, now), /room failed/);
-  assert.deepEqual(logs, [{ event: 'history_read_usage', queries: 7, rowsRead: 9, deviceRowsRead: 3, metadataAvailable: false }]);
+  assert.deepEqual(logs, [{ event: 'history_read_usage', range: '24h', queries: 7, rowsRead: 9, deviceRowsRead: 3, metadataAvailable: false }]);
 });

@@ -161,3 +161,7 @@ h1 {
 .series-line.outdoor-series { stroke: #218068; stroke-dasharray: 6 4; }
 .series-point.outdoor-series { fill: #218068; }
 .chart-legend { font-size: 13px; color: #59616d; }
+
+.reading-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.reading-pages button { min-height: 44px; padding: 8px 12px; font: inherit; cursor: pointer; }
+.reading-pages button[aria-disabled="true"] { opacity: .5; cursor: default; }
