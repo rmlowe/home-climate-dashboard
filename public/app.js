@@ -86,7 +86,7 @@ function renderRooms(rooms) {
       // A previously cached live response may lack the new key for up to 30 seconds.
       shortcut.disabled = !room.id;
       shortcut.dataset.historyId = room.id ?? '';
-      shortcut.textContent = "View 24-hour history";
+      shortcut.textContent = "View history";
       shortcut.setAttribute("aria-label", `View ${room.name} history`);
       shortcut.setAttribute("aria-controls", "history-section");
       const comparison = document.createElement('p');
@@ -113,4 +113,3 @@ if ("serviceWorker" in navigator) {
 
 refresh();
 setInterval(refresh, 30_000);
-

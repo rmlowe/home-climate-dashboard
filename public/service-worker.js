@@ -1,4 +1,4 @@
-const CACHE_NAME = "home-climate-static-seven-day-efficiency-v1";
+const CACHE_NAME = "home-climate-static-seven-day-efficiency-v2";
 const STATIC_ASSETS = [
   "/style.css",
   "/app.js",
@@ -48,4 +48,3 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
-
