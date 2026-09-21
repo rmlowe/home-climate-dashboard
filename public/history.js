@@ -1,5 +1,6 @@
 import { chart, freshness } from './chart.js';
 import { dailyTable } from './daily.js';
+import { createHistoryPoller } from './history-polling.js';
 import { weather } from './weather.js';
 
 const rangeSelect = document.querySelector('#history-range');
@@ -9,7 +10,6 @@ const times = document.querySelector('#history-freshness');
 const charts = document.querySelector('#history-charts');
 const error = document.querySelector('#history-error');
 let data;
-let busy = false;
 let requestedRoom;
 let renderedRoom;
 const details = document.querySelector('#history-details');
@@ -40,10 +40,7 @@ function renderCharts() {
   details.hidden = false;
   renderStatus();
 }
-async function refreshHistory() {
-  if (busy) return;
-  busy = true;
-  const range = rangeSelect.value;
+async function refreshHistory(range) {
   try {
     const response = await fetch(`/api/history?range=${range}`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -77,11 +74,10 @@ async function refreshHistory() {
     error.hidden = false;
     if (!data) status.textContent = '';
     renderStatus();
-  } finally {
-    busy = false;
-    if (range !== rangeSelect.value) refreshHistory();
   }
 }
+const historyPoller = createHistoryPoller(refreshHistory, () => document.hidden, Date.now, () => rangeSelect.value);
+
 function showMissingRoom() {
   select.value = '';
   charts.replaceChildren(); details.hidden = true;
@@ -97,7 +93,7 @@ document.querySelector('#rooms').addEventListener('click', event => {
     renderCharts();
   } else {
     showMissingRoom();
-    refreshHistory();
+    historyPoller.refresh();
   }
   const heading = document.querySelector('#history-heading');
   heading.focus({ preventScroll: true });
@@ -112,12 +108,12 @@ rangeSelect.addEventListener('change', () => {
   charts.replaceChildren(); details.hidden = true; error.hidden = true;
   document.querySelector('#history-heading').textContent = rangeSelect.value === '7d' ? 'Last 7 days' : 'Last 24 hours';
   status.textContent = 'Loading history…';
-  refreshHistory();
+  historyPoller.refresh();
 });
 select.addEventListener('change', () => { requestedRoom = undefined; renderCharts(); });
-refreshHistory();
-setInterval(refreshHistory, 60_000);
+historyPoller.refresh();
+setInterval(() => historyPoller.refresh(), 30_000);
 setInterval(renderStatus, 30_000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshHistory(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) historyPoller.refresh(); });
 
 window.addEventListener('weather-updated', renderCharts);
