@@ -16,7 +16,7 @@ Browser / installed PWA
                                       +--> Govee OpenAPI
 ```
 
-The Worker discovers compatible thermometer devices, fetches their current state in parallel, converts the observed H5179 Fahrenheit readings to Celsius, and returns a small JSON response. The complete response is cached at the Worker for 30 seconds to avoid unnecessary Govee API calls.
+The Worker discovers compatible thermometer devices, fetches their current state in parallel, converts the observed H5179 Fahrenheit readings to Celsius, and returns a small JSON response. The shared current-reading snapshot is cached internally at the Worker for 30 seconds to avoid unnecessary Govee API calls. Dashboard and MCP responses use private/no-store headers; neither exposes the internal cache entry.
 
 ## Progressive Web App
 
@@ -117,7 +117,7 @@ Verify with `PRAGMA table_info('weather_cache');`. This only creates a separate 
 npm test
 ```
 
-Tests need no API key, Cloudflare account or installed dependencies. They mock Govee HTTP responses and execute the actual migration, collector and history SQL in an in-memory SQLite database through a small D1 adapter. GitHub Actions runs them on pull requests. They also cover delayed/replayed slots, collection-time window boundaries, latest valid versus incomplete readings, indexed history queries, chart gaps and freshness logic. They do not validate browser rendering, Cloudflare deployment or a live Govee connection.
+Run `npm ci` first. Tests need no API key or Cloudflare account. They mock Govee HTTP responses and execute the actual migration, collector and history SQL in an in-memory SQLite database through a small D1 adapter. GitHub Actions runs them on pull requests. They also cover delayed/replayed slots, collection-time window boundaries, latest valid versus incomplete readings, indexed history queries, chart gaps and freshness logic. They do not validate browser rendering, Cloudflare deployment or a live Govee connection.
 
 ### Enable collection in production
 
@@ -170,3 +170,78 @@ The dashboard shows current readings and selectable 24-hour or seven-day indoor 
 Device discovery seeks the first device ID and then each ID greater than the previous one, using existing indexes. It needs no schema migration and retains stopped devices. History requests emit a `history_read_usage` log with the selected `range`, total `rowsRead`, `deviceRowsRead`, `queries`, and `metadataAvailable`. Counts come from D1 result metadata; if metadata is absent the flag is false and totals are incomplete. Logs contain no device identifiers or readings. Worker logs are enabled in Wrangler. Preview URLs do not support logs, so compare `24h` and `7d` read costs after production deployment; the measured old DISTINCT discovery query read 9,263 rows. Local SQLite query-plan tests verify indexed seeks but cannot establish D1 billed read counts.
 
 Automatic history polling is limited to one attempt per five minutes per page, skips hidden tabs and avoids overlapping requests. Returning to a visible page fetches only when due. Changing the selected range fetches immediately, or after the current request finishes; intermediate range changes are coalesced. Failed attempts for the same range also wait until the next interval, limiting retries. Freshness labels continue to update without database reads. Live readings, weather polling and the scheduled collector are unchanged.
+
+
+## MCP: current indoor conditions
+
+`POST /mcp` exposes one read-only tool, `get_current_conditions`, through the
+Cloudflare stateless MCP handler with Streamable HTTP and SDK legacy-client
+compatibility. This is a first integration for MCP Inspector and clients that
+accept a configured Authorization header. It does **not** implement OAuth or
+provide a ready-to-use consumer assistant sign-in flow yet.
+
+The endpoint is disabled (404) unless `MCP_AUTH_TOKEN` is a secret of at least
+32 characters. A valid `Authorization: Bearer <token>` header is required for
+all MCP requests, including discovery. Missing/incorrect credentials return 401;
+cross-origin browser requests return 403. Tokens are compared via fixed-size
+SHA-256 digests using a timing-safe comparison. No CORS access is enabled.
+The default SDK Host checks protect local development against DNS rebinding.
+
+The tool takes no arguments and returns:
+
+- Room names and the same opaque IDs used by the dashboard/history API.
+- Temperature in Celsius, humidity in percent and `online` as true/false/null.
+- Per-room and snapshot `retrievedAt` times (UTC ISO strings), plus the 30-second
+  cache lifetime. These are API retrieval times, **not sensor measurement times**.
+- Null metrics for offline/unknown devices or missing values; valid zero values
+  remain zero. An empty device list returns an empty room array.
+
+The dashboard and MCP share the same internal cache and Govee normalization.
+The dashboard retains its existing response shape; offline/unknown metrics are
+now null there too. MCP emits both structured content and matching JSON text.
+Upstream failures return a generic MCP tool error, expose no upstream error
+text or credentials, and are not cached. The first tool reads Govee only; it
+performs no D1 queries or writes. Outdoor estimates, historical summaries and
+collection health are follow-ups.
+
+### Local verification
+
+1. Run `npm ci` and `npm test`. `npx wrangler deploy --dry-run` checks the Worker
+   bundle without deploying. CI runs both tests and the dry-run build.
+2. Add `MCP_AUTH_TOKEN` to the ignored `.dev.vars` file alongside `GOVEE_API_KEY`.
+   Generate a dedicated random token, for example with
+   `openssl rand -hex 32`. Never reuse the Govee key or commit either secret.
+3. Run `npm run dev` and start MCP Inspector with
+   `npx @modelcontextprotocol/inspector`. Use its proxy mode, select Streamable
+   HTTP and enter `http://localhost:8787/mcp` (or the port Wrangler reports).
+   Configure the Authorization header with `Bearer ` followed by your token.
+   Direct cross-origin browser mode is intentionally not enabled.
+4. Connect, list tools and call `get_current_conditions` with `{}`. Compare the
+   values with the dashboard within the same cache window. Local use makes real
+   Govee reads when the cache is empty, but does not run the scheduled collector.
+
+### Remote activation and Access
+
+Merging this PR does not activate MCP: `MCP_AUTH_TOKEN` is absent from committed
+configuration and is not a required deployment secret. Preview URLs also remain
+disabled unless that environment has explicitly been given the secret.
+
+Before remote activation, verify the Cloudflare Access policy covers `/mcp` on
+all relevant hostnames. Retain the existing household Access policy. A client
+using this interim header-based setup must satisfy **both** Access and the
+Worker token check; the Worker token does not replace an Access session or
+Access service credentials. Use a client with support for the necessary headers
+and an authorized Access service-token policy if applicable. Do not disable
+Access to make the connection work. Consumer assistant OAuth integration is a
+separate follow-up requiring an end-to-end client test.
+
+After that configuration is reviewed, the Worker secret can be installed with
+`npx wrangler secret put MCP_AUTH_TOKEN`. That command is an activation step,
+not part of the test workflow. Verify an unauthenticated request cannot list
+or call tools, then test authenticated discovery and readings. Delete the
+secret to disable the endpoint again. No database migration is needed.
+
+Tests cover SDK initialization/discovery/calls, authentication before data
+access, invalid arguments, shared caching, opaque identifiers, units, offline
+and missing values, and sanitized upstream errors. They do not establish remote
+Access policy correctness or consumer-client OAuth compatibility.
