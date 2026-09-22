@@ -155,7 +155,7 @@ test("live endpoint supplies an opaque room key without a DB", async () => {
     { waitUntil(promise) { pending.push(promise); } });
   await Promise.all(pending);
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Cache-Control"), "public, max-age=30");
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
   const body = await response.json();
   assert.deepEqual(Object.keys(body).sort(), ["rooms", "updated"]);
   assert.match(body.rooms[0].id, /^[a-f0-9]{64}$/);

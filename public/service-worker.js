@@ -35,7 +35,7 @@ self.addEventListener("fetch", (event) => {
 
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
 
-  if (url.pathname.startsWith("/api/")) return;
+  if (url.pathname.startsWith("/api/") || url.pathname === "/mcp") return;
 
   if (request.mode === "navigate") {
     event.respondWith(fetch(request));

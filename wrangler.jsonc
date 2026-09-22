@@ -3,10 +3,11 @@
   "name": "home-climate-dashboard",
   "main": "src/index.js",
   "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/mcp"]
   },
   // Production readings table was created via D1 Console; see README.
   "d1_databases": [{
