@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { mcpAuthConfig, authenticateMcp } from './mcp-auth.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
@@ -40,16 +40,14 @@ function createServer(request, env, ctx) {
 }
 
 export async function handleMcp(request, env, ctx) {
-  // No secret means no endpoint, including on deployment previews.
-  if (typeof env.MCP_AUTH_TOKEN !== 'string' || env.MCP_AUTH_TOKEN.length < 32) {
+  // Missing or invalid mode-specific configuration keeps the endpoint disabled.
+  const auth = mcpAuthConfig(env);
+  if (!auth) {
     return new Response('Not found', { status: 404, headers: { 'Cache-Control': 'private, no-store' } });
   }
   const origin = request.headers.get('Origin');
   if (origin && origin !== new URL(request.url).origin) return denied(403);
-  const authorization = request.headers.get('Authorization') ?? '';
-  if (!authorization.startsWith('Bearer ') || !await tokensEqual(authorization.slice(7), env.MCP_AUTH_TOKEN)) {
-    return denied(401);
-  }
+  if (!await authenticateMcp(request, auth)) return denied(401);
   const response = await createMcpHandler(() => createServer(request, env, ctx), {
     route: '/mcp', corsOptions: false,
     allowedOriginHostnames: [new URL(request.url).hostname],
@@ -64,11 +62,4 @@ function denied(status) {
     status,
     headers: { 'Cache-Control': 'private, no-store', ...(status === 401 ? { 'WWW-Authenticate': 'Bearer realm="home-climate"' } : {}) },
   });
-}
-
-async function tokensEqual(provided, expected) {
-  // Compare fixed-size digests without leaking the matching token prefix.
-  const encode = new TextEncoder();
-  const digests = await Promise.all([provided, expected].map(token => crypto.subtle.digest('SHA-256', encode.encode(token))));
-  return timingSafeEqual(new Uint8Array(digests[0]), new Uint8Array(digests[1]));
 }

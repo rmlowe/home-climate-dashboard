@@ -176,12 +176,14 @@ Automatic history polling is limited to one attempt per five minutes per page, s
 
 `POST /mcp` exposes one read-only tool, `get_current_conditions`, through the
 Cloudflare stateless MCP handler with Streamable HTTP and SDK legacy-client
-compatibility. This is a first integration for MCP Inspector and clients that
-accept a configured Authorization header. It does **not** implement OAuth or
-provide a ready-to-use consumer assistant sign-in flow yet.
+compatibility. Authentication supports a shared bearer token for local/Inspector use and
+Cloudflare Access signed assertions for Managed OAuth. Cloudflare owns OAuth
+discovery, registration, consent and token issuance; the Worker validates the
+assertion forwarded by Access. Real-client OAuth compatibility must be verified
+during activation.
 
-The endpoint is disabled (404) unless `MCP_AUTH_TOKEN` is a secret of at least
-32 characters. A valid `Authorization: Bearer <token>` header is required for
+In the default bearer mode, the endpoint is disabled (404) unless
+`MCP_AUTH_TOKEN` is a secret of at least 32 characters. A valid `Authorization: Bearer <token>` header is required for
 all MCP requests, including discovery. Missing/incorrect credentials return 401;
 cross-origin browser requests return 403. Tokens are compared via fixed-size
 SHA-256 digests using a timing-safe comparison. No CORS access is enabled.
@@ -220,28 +222,83 @@ collection health are follow-ups.
    values with the dashboard within the same cache window. Local use makes real
    Govee reads when the cache is empty, but does not run the scheduled collector.
 
-### Remote activation and Access
+### Managed OAuth through Cloudflare Access
 
-Merging this PR does not activate MCP: `MCP_AUTH_TOKEN` is absent from committed
-configuration and is not a required deployment secret. Preview URLs also remain
-disabled unless that environment has explicitly been given the secret.
+Select one authentication mode with `MCP_AUTH_MODE`:
 
-Before remote activation, verify the Cloudflare Access policy covers `/mcp` on
-all relevant hostnames. Retain the existing household Access policy. A client
-using this interim header-based setup must satisfy **both** Access and the
-Worker token check; the Worker token does not replace an Access session or
-Access service credentials. Use a client with support for the necessary headers
-and an authorized Access service-token policy if applicable. Do not disable
-Access to make the connection work. Consumer assistant OAuth integration is a
-separate follow-up requiring an end-to-end client test.
+| Mode | Required configuration | Accepted credential |
+| --- | --- | --- |
+| `bearer` (default) | `MCP_AUTH_TOKEN`, at least 32 characters | Matching Authorization bearer token; Access remains an additional edge gate |
+| `access` | `MCP_ACCESS_TEAM_DOMAIN` and `MCP_ACCESS_AUD` | Verified `Cf-Access-Jwt-Assertion` from Access |
+| `disabled` or any unrecognised value | None | Endpoint returns 404 |
 
-After that configuration is reviewed, the Worker secret can be installed with
-`npx wrangler secret put MCP_AUTH_TOKEN`. That command is an activation step,
-not part of the test workflow. Verify an unauthenticated request cannot list
-or call tools, then test authenticated discovery and readings. Delete the
-secret to disable the endpoint again. No database migration is needed.
+Incomplete or invalid mode-specific configuration returns 404. Access mode
+never falls back to the bearer secret, even if one remains configured. No
+activation variables are committed, so merging this change leaves the existing
+unconfigured endpoint disabled.
 
-Tests cover SDK initialization/discovery/calls, authentication before data
-access, invalid arguments, shared caching, opaque identifiers, units, offline
-and missing values, and sanitized upstream errors. They do not establish remote
-Access policy correctness or consumer-client OAuth compatibility.
+`MCP_ACCESS_TEAM_DOMAIN` must be the exact HTTPS team origin, for example
+`https://your-team.cloudflareaccess.com`, without a trailing slash or path.
+`MCP_ACCESS_AUD` is the **Application Audience (AUD) Tag** of the Access
+application protecting this Worker, not its application ID or account ID.
+Both are configuration variables, not secrets. Get the actual values from
+Zero Trust; do not deploy example values. Configure them durably in Wrangler
+or your deployment configuration so future deployments retain them.
+
+Access mode uses `jose` to validate RS256 signatures, issuer, application
+audience, expiry and not-before time when present. Expiry, issued-at and a
+nonempty subject are required; future issued-at times are rejected. The only
+key source is the configured team's `/cdn-cgi/access/certs` endpoint. JWT
+headers/claims cannot choose another key URL. JWKS resolvers are cached per
+issuer with a five-minute cache, 30-second refresh cooldown and five-second
+fetch timeout. Invalid assertions and key-fetch failures fail closed with a
+generic 401; tokens and validation error details are never logged.
+
+Cloudflare Managed OAuth gives the client an **opaque OAuth token**, then
+resolves it at the edge and forwards a signed JWT assertion to the Worker.
+The Worker deliberately does not interpret that opaque bearer value as a JWT
+or accept an unverified email header. Existing Access policies determine who
+may access the application; retain the household allowlist and do not add
+bypass policies. An authenticated browser can also supply a valid Access
+assertion: this mode authenticates Access users, not only OAuth sessions.
+
+### Staged activation
+
+1. Deploy the code with MCP still disabled. Verify the dashboard and its refresh,
+   and confirm `/mcp` shows 404 after Access login.
+2. Verify Access protects the intended production hostname and all enabled
+   preview/alternate URLs. Keep preview activation separate: a different Access
+   application has a different audience. Do not copy production auth settings
+   to previews blindly.
+3. Set the actual team origin and application AUD, then set `MCP_AUTH_MODE=access`
+   last. This is an activation step: authenticated Access users can now reach
+   MCP, including through existing browser sessions. No shared MCP secret is
+   needed in this mode.
+4. In **Zero Trust → Access controls → Applications → the protecting application
+   → Edit → Advanced settings**, enable **Managed OAuth**. Restrict redirect
+   URIs to those required by the chosen client. Enable localhost/loopback
+   callbacks only if the test client needs them. Leave the existing Access
+   identity policy in place.
+5. Test OAuth discovery and browser sign-in with an RFC 8707-capable MCP client,
+   then list tools and call `get_current_conditions`. Compare its values and
+   retrieval times with the dashboard. Verify unauthenticated access prompts
+   for authentication, and a user outside the allowlist cannot connect. Test
+   reconnect/token refresh before treating the integration as complete.
+
+Cloudflare supplies discovery and OAuth endpoints at the edge; do not add
+Worker-owned OAuth routes or bypass Access to make discovery work. The Worker
+401 is a generic rejection for requests that reach it without a valid assertion;
+it is not a replacement OAuth discovery implementation. Client registration,
+redirect URIs and browser Origin behaviour still require a real-client test.
+
+Rollback: set `MCP_AUTH_MODE=disabled` to close the tool endpoint, while keeping
+Access protection. Turning off Managed OAuth alone does not disable access
+through existing authenticated browser sessions. No database migration is needed.
+
+Tests use locally generated RSA keys and a mocked JWKS endpoint to exercise
+real signature/claim verification, discovery and tool calls, invalid config,
+forged/expired/wrong-audience tokens, denied origins and key-fetch failure.
+They do not establish live Access policy correctness or client compatibility.
+
+References: [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/),
+[Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
