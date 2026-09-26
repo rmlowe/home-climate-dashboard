@@ -29,6 +29,10 @@
     }
   },
   "vars": {
+    // Non-secret Access identifiers; keep in sync with the protecting application.
+    "MCP_AUTH_MODE": "access",
+    "MCP_ACCESS_TEAM_DOMAIN": "https://frosty-poetry-2e73.cloudflareaccess.com",
+    "MCP_ACCESS_AUD": "476e1a1062e389e1211d7d20cc2cce4f49acb2150ae648a618e1532d95e4b65b",
     "GOVEE_TEMPERATURE_UNIT": "fahrenheit",
     "WEATHER_LATITUDE": "51.61",
     "WEATHER_LONGITUDE": "-0.21",
