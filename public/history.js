@@ -1,4 +1,5 @@
 import { chart, freshness } from './chart.js';
+import { summaryTable } from './summary-table.js';
 import { dailyTable } from './daily.js';
 import { createHistoryPoller } from './history-polling.js';
 import { weather } from './weather.js';
@@ -31,7 +32,7 @@ function renderCharts() {
     open: detail.open, page: Number(detail.dataset.page || 0),
     focused: detail.contains(document.activeElement) ? document.activeElement.dataset.historyFocus : null,
   })) : [];
-  charts.replaceChildren(chart(room, 'temperature', data, weather, previous[0]), chart(room, 'humidity', data, weather, previous[1]), dailyTable(room, data));
+  charts.replaceChildren(summaryTable(room, data), chart(room, 'temperature', data, weather, previous[0]), chart(room, 'humidity', data, weather, previous[1]), dailyTable(room, data));
   [...charts.querySelectorAll('details')].forEach((detail, index) => {
     const focused = previous[index]?.focused;
     if (focused) detail.querySelector(`[data-history-focus="${focused}"]`)?.focus({ preventScroll: true });

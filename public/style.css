@@ -165,3 +165,8 @@ h1 {
 .reading-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
 .reading-pages button { min-height: 44px; padding: 8px 12px; font: inherit; cursor: pointer; }
 .reading-pages button[aria-disabled="true"] { opacity: .5; cursor: default; }
+
+.period-summary h3 { margin: 0 8px 12px; }
+.period-summary table { table-layout: fixed; font-size: 14px; }
+.period-summary th, .period-summary td { overflow-wrap: anywhere; }
+.period-summary th:first-child { width: 28%; }

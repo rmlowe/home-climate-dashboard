@@ -57,12 +57,12 @@ test('MCP is disabled without a strong token and rejects unauthorized requests b
   assert.equal((await worker.fetch(request('tools/list', {}, { Origin: 'https://evil.example' }), env, ctx)).status, 403);
 });
 
-test('SDK handshake and discovery expose only the read-only current conditions tool', async () => {
+test('SDK handshake and discovery expose three read-only tools', async () => {
   const init = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result.serverInfo.name, 'home-climate');
   const listed = await rpc('tools/list');
-  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions']);
-  assert.equal(listed.result.tools[0].annotations.readOnlyHint, true);
+  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health']);
+  assert.ok(listed.result.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
 });
 
 test('tool returns Celsius, units, retrieval times and opaque IDs; dashboard shares its cache', async () => {

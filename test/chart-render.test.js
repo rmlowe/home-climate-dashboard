@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { summaryTable } from '../public/summary-table.js';
 import { chart, decimate, segments } from '../public/chart.js';
 
 // Minimal DOM adapter for testing node counts and lazy table interactions without a browser.
@@ -79,4 +80,20 @@ test('isolated readings remain visible without allocating a DOM node per gap', t
   assert.equal(figure.all('path').length, 1);
   assert.equal((figure.all('path')[0].attrs.d.match(/M /g) || []).length, 1009);
   assert.equal(figure.all('tr').length, 0);
+});
+
+
+test('period summary renders missing changes, valid zeros and humidity percentage points', t => {
+  const previous = globalThis.document;
+  globalThis.document = { createElement: tag => new Node(tag) };
+  t.after(() => { globalThis.document = previous; });
+  const data = { from: 0, to: 3 * intervalMs, intervalMs };
+  const room = { id: 'room', name: 'Room', points: [
+    { collectedAt: 0, scheduledAt: 0, online: true, temperature: 0, humidity: 40 },
+    { collectedAt: intervalMs, scheduledAt: intervalMs, online: true, temperature: null, humidity: 45 },
+  ] };
+  const rows = summaryTable(room, data).all('tbody')[0].children.map(row => row.children.map(cell => cell.textContent));
+  assert.deepEqual(rows[0], ['Min / max', '0.0 °C / 0.0 °C', '40.0% / 45.0%']);
+  assert.deepEqual(rows[2], ['Change', '—', '5.0 pp']);
+  assert.deepEqual(rows[3], ['Coverage', '33.3% (1/3)', '66.7% (2/3)']);
 });

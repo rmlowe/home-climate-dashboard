@@ -81,7 +81,7 @@ The collector calls Govee directly, independently of browser traffic and the liv
 
 `GET /api/history` returns a rolling 24-hour window by default. `?range=24h` and `?range=7d` select the supported windows. Unknown parameters, duplicate ranges and unsupported values return 400; other methods return 405. Unconfigured or unavailable storage returns 503. Empty storage returns 200 with an empty `rooms` array. Responses use `Cache-Control: private, no-store` and are excluded from the service worker cache.
 
-The response contains `from`, `to`, `intervalMs`, `staleAfterMs` and `rooms`. All times and durations are milliseconds. Each room has an opaque `id`, its latest `name`, `lastCollectedAt`, `lastValidAt` (nullable), and `points`. Each point includes `scheduledAt`, `collectedAt`, `temperature` (Celsius), `humidity` (percent), and nullable boolean `online`. A valid reading means online with both metrics present. Rooms without samples in the window remain listed, so a stopped collector is not hidden.
+The response contains `from`, `to`, `intervalMs`, `staleAfterMs` and `rooms`. All times and durations are milliseconds. Each room has an opaque `id`, its latest `name`, `lastCollectedAt`, `lastValidAt` (nullable), `lastReadingStatus` (online/offline/unknown/incomplete), and `points`. Each point includes `scheduledAt`, `collectedAt`, `temperature` (Celsius), `humidity` (percent), and nullable boolean `online`. A valid reading means online with both metrics present. Rooms without samples in the window remain listed, so a stopped collector is not hidden.
 
 Each current-reading card links directly to its room’s history, with keyboard support and reduced-motion-aware scrolling. Live and history responses share an opaque room key, so matching does not depend on room names. Freshness status sits beside the history heading, with detailed timestamps in an expandable Collection details section. The dashboard retains the current-reading cards and adds a room selector with separate temperature and humidity charts. Charts and tables are ordered by actual collection time, with scheduled time breaking ties. The rolling window and latest collection/valid-reading metadata also use collection time. Charts use local time; lines break at missing or replayed scheduled slots, non-increasing collection times, collection gaps over ten minutes, offline readings or a missing metric. Valid zero readings and isolated points are preserved. Expandable tables provide exact values for touch, keyboard and screen-reader users. Rows are built only when opened and paginated in groups of 100; the selected page and control focus survive automatic refreshes. Plotting reduces each uninterrupted run into display-width buckets, retaining endpoints and extrema. Separate SVG subpaths preserve gaps and isolated readings without one DOM node per sample; summaries still use all original readings. Last collection and last valid reading times are shown separately; a ten-minute threshold marks stale data. History refreshes at most every five minutes while the page is visible; changing the selected range fetches immediately, with freshness re-evaluated between requests and old data clearly labelled if refresh fails.
 
@@ -172,9 +172,9 @@ Device discovery seeks the first device ID and then each ID greater than the pre
 Automatic history polling is limited to one attempt per five minutes per page, skips hidden tabs and avoids overlapping requests. Returning to a visible page fetches only when due. Changing the selected range fetches immediately, or after the current request finishes; intermediate range changes are coalesced. Failed attempts for the same range also wait until the next interval, limiting retries. Freshness labels continue to update without database reads. Live readings, weather polling and the scheduled collector are unchanged.
 
 
-## MCP: current indoor conditions
+## MCP: indoor conditions, history and collection health
 
-`POST /mcp` exposes one read-only tool, `get_current_conditions`, through the
+`POST /mcp` exposes three read-only tools through the
 Cloudflare stateless MCP handler with Streamable HTTP and SDK legacy-client
 compatibility. Authentication supports a shared bearer token for local/Inspector use and
 Cloudflare Access signed assertions for Managed OAuth. Cloudflare owns OAuth
@@ -189,7 +189,7 @@ cross-origin browser requests return 403. Tokens are compared via fixed-size
 SHA-256 digests using a timing-safe comparison. No CORS access is enabled.
 The default SDK Host checks protect local development against DNS rebinding.
 
-The tool takes no arguments and returns:
+`get_current_conditions` takes no arguments and returns:
 
 - Room names and the same opaque IDs used by the dashboard/history API.
 - Temperature in Celsius, humidity in percent and `online` as true/false/null.
@@ -203,8 +203,76 @@ The dashboard retains its existing response shape; offline/unknown metrics are
 now null there too. MCP emits both structured content and matching JSON text.
 Upstream failures return a generic MCP tool error, expose no upstream error
 text or credentials, and are not cached. The first tool reads Govee only; it
-performs no D1 queries or writes. Outdoor estimates, historical summaries and
-collection health are follow-ups.
+performs no D1 queries or writes. Outdoor estimates remain a follow-up. Historical summaries and collection health
+read D1 through the same authenticated endpoint; neither polls Govee.
+
+### Historical summaries
+
+`get_history_summary` defaults to the last 24 hours. Supply **both** `from` and
+`to` for an overnight or custom interval, as ISO timestamps with `Z` or an
+explicit UTC offset. The window must be positive, entirely within the last seven
+days, and must not extend into the future. Clients resolve local dates and DST;
+the server does not guess what “last night” means. For example:
+
+```json
+{"from":"2026-09-25T23:00:00+01:00","to":"2026-09-26T08:00:00+01:00"}
+```
+
+This example is valid only while it is inside the seven-day lookback. The summary
+window is **[from, to)**: start inclusive, end exclusive. The chart history API
+keeps its existing inclusive endpoints; the shared summary calculation excludes
+samples exactly at `to`.
+
+The compact result contains all known rooms as of the window end, with opaque
+IDs and separate temperature/humidity statistics:
+
+- Valid online sample count, observed min/max and arithmetic sample mean.
+- First/last observed values and collection times; change is last minus first,
+  not a claim about unsampled window endpoints. Change is null unless there are
+  at least two distinct collection times. Humidity change is in percentage points.
+- Observed/expected five-minute UTC collection periods and coverage percentage.
+  Partial edge periods each count once. Multiple readings in one period count
+  once towards coverage but remain individual samples for min/max/mean.
+- Longest consecutive run of periods without a valid reading, including leading
+  and trailing gaps. This is a period count, **not a measured duration**.
+
+Missing, offline and unknown readings are excluded per metric; zero remains
+valid. Empty room windows return null statistics and zero coverage. Scheduled
+slot replays cannot inflate coverage, which uses actual collection time.
+Gaps are unknown conditions and can hide extremes; there is no interpolation,
+threshold-duration estimate or comfort classification. Output timestamps
+`from`, `to`, `firstCollectedAt` and `lastCollectedAt` are Unix milliseconds;
+`retrievedAt` is the ISO query time. None is a sensor measurement timestamp.
+
+The dashboard's **Selected period summary** uses this exact calculation on
+already-loaded history, for both 24-hour and seven-day views, with no additional
+API calls. Daily temperature summaries and charts remain available below it.
+
+### Collection health
+
+`get_collection_health` takes no arguments and reads the latest stored collection
+metadata plus last-24-hour coverage. It retains stopped rooms and reports:
+
+- Last collection and last valid reading (online with both metrics present).
+- Separate stale flags using the existing ten-minute threshold.
+- Last recorded status: online, offline, unknown or incomplete. This is not a
+  live sensor check, and a recent collection can contain an offline reading.
+- Overall collection recency: `no_data`, `no_recent_collections`,
+  `some_rooms_stale` or `recent_collections`. The last means collections are
+  recent, not that every sensor is healthy.
+
+Stored history alone cannot establish whether missing collections result from
+cron failure, an upstream error or a disconnected device. Both tools return
+sanitized tool errors when D1 is missing/unavailable, and empty successes when
+storage is empty. They use existing indexed history queries and aggregate read
+telemetry, without a database migration, new Govee requests or auth changes.
+History queries remain uncached and bounded to seven days; collection health
+reads 24 hours. Logs label custom summary queries with `range: "custom"`.
+
+After deployment, refresh/reconnect the client's tool list, ask about the last
+24 hours and a local overnight interval, then compare with the dashboard. Check
+collection health separately. Live client validation and production D1 read-cost
+verification remain deployment checks; local tests use SQLite and mocked auth.
 
 ### Local verification
 

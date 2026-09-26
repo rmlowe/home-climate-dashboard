@@ -1,8 +1,10 @@
-const CACHE_NAME = "home-climate-static-seven-day-efficiency-v2";
+const CACHE_NAME = "home-climate-static-history-summary-v1";
 const STATIC_ASSETS = [
   "/style.css",
   "/app.js",
   "/history.js",
+  "/history-summary.js",
+  "/summary-table.js",
   "/history-polling.js",
   "/chart.js",
   "/daily.js",
