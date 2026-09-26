@@ -210,7 +210,8 @@ collection health are follow-ups.
 
 1. Run `npm ci` and `npm test`. `npx wrangler deploy --dry-run` checks the Worker
    bundle without deploying. CI runs both tests and the dry-run build.
-2. Add `MCP_AUTH_TOKEN` to the ignored `.dev.vars` file alongside `GOVEE_API_KEY`.
+2. Set `MCP_AUTH_MODE=bearer` and add `MCP_AUTH_TOKEN` in the ignored `.dev.vars`
+   file alongside `GOVEE_API_KEY`, overriding the committed Access mode locally.
    Generate a dedicated random token, for example with
    `openssl rand -hex 32`. Never reuse the Govee key or commit either secret.
 3. Run `npm run dev` and start MCP Inspector with
@@ -233,9 +234,21 @@ Select one authentication mode with `MCP_AUTH_MODE`:
 | `disabled` or any unrecognised value | None | Endpoint returns 404 |
 
 Incomplete or invalid mode-specific configuration returns 404. Access mode
-never falls back to the bearer secret, even if one remains configured. No
-activation variables are committed, so merging this change leaves the existing
-unconfigured endpoint disabled.
+never falls back to the bearer secret, even if one remains configured.
+`wrangler.jsonc` commits the production Access mode, team origin and application
+AUD so deployments preserve the working authentication configuration. These
+values are not secrets; the Govee API key remains a Cloudflare secret.
+
+Deployments using this configuration, including version preview uploads, require
+an assertion from the configured production Access application. Previews protected
+by a different Access application will reject its audience; configure those
+environments separately or set `MCP_AUTH_MODE=disabled` for them.
+
+On 26 September 2026, Claude successfully connected through Managed OAuth,
+discovered `get_current_conditions`, and returned readings matching the dashboard
+for all three rooms. Token refresh and rejection of users outside the Access
+allowlist remain separate live checks. Managed OAuth, callback URIs and Access
+policies are configured in Cloudflare Zero Trust, not in Wrangler.
 
 `MCP_ACCESS_TEAM_DOMAIN` must be the exact HTTPS team origin, for example
 `https://your-team.cloudflareaccess.com`, without a trailing slash or path.
@@ -262,9 +275,9 @@ may access the application; retain the household allowlist and do not add
 bypass policies. An authenticated browser can also supply a valid Access
 assertion: this mode authenticates Access users, not only OAuth sessions.
 
-### Staged activation
+### Staged activation for a new installation
 
-1. Deploy the code with MCP still disabled. Verify the dashboard and its refresh,
+1. Set `MCP_AUTH_MODE=disabled` before the initial deployment. Verify the dashboard and its refresh,
    and confirm `/mcp` shows 404 after Access login.
 2. Verify Access protects the intended production hostname and all enabled
    preview/alternate URLs. Keep preview activation separate: a different Access
