@@ -4,7 +4,13 @@ const SLOT = 300_000;
 // Fetch time defines the window and chronology; scheduled slots identify cron gaps.
 export async function readHistory(DB, now = Date.now(), range = '24h') {
   if (!['24h', '7d'].includes(range)) throw new Error('Unsupported history range');
-  const from = now - DAY * (range === '7d' ? 7 : 1);
+  return readHistoryWindow(DB, now - DAY * (range === '7d' ? 7 : 1), now, range);
+}
+
+export async function readHistoryWindow(DB, from, now, range = 'custom') {
+  if (!Number.isFinite(from) || !Number.isFinite(now) || from >= now || now - from > 7 * DAY) {
+    throw new Error('History window must be positive and at most seven days');
+  }
   const usage = { event: 'history_read_usage', range, queries: 0, rowsRead: 0, deviceRowsRead: 0, metadataAvailable: true };
   async function query(statement, discovery = false) {
     usage.queries++;
@@ -35,7 +41,7 @@ export async function readHistory(DB, now = Date.now(), range = '24h') {
       cursor = device.device_id;
     }
     const outcomes = await Promise.allSettled(devices.map(async ({ device_id }) => {
-      const [latest] = await query(DB.prepare(`SELECT device_name, collected_at FROM readings
+      const [latest] = await query(DB.prepare(`SELECT device_name, collected_at, online, temperature_c, humidity_percent FROM readings
         WHERE device_id = ? AND collected_at <= ? ORDER BY collected_at DESC, scheduled_at DESC LIMIT 1`)
         .bind(device_id, now));
       if (!latest) return null;
@@ -52,6 +58,8 @@ export async function readHistory(DB, now = Date.now(), range = '24h') {
         id: await roomKey(device_id),
         name: latest.device_name,
         lastCollectedAt: latest.collected_at,
+        lastReadingStatus: latest.online === 0 ? 'offline' : latest.online !== 1 ? 'unknown'
+          : Number.isFinite(latest.temperature_c) && Number.isFinite(latest.humidity_percent) ? 'online' : 'incomplete',
         lastValidAt: valid?.collected_at ?? null,
         points: results.map(r => ({
           scheduledAt: r.scheduled_at, collectedAt: r.collected_at,

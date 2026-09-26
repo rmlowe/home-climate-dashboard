@@ -1,3 +1,4 @@
+import { registerHistoryTools } from './history-tools.js';
 import { mcpAuthConfig, authenticateMcp } from './mcp-auth.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
@@ -36,6 +37,7 @@ function createServer(request, env, ctx) {
       return { isError: true, content: [{ type: 'text', text: 'Unable to retrieve Govee readings. Try again later.' }] };
     }
   });
+  registerHistoryTools(server, env);
   return server;
 }
 
