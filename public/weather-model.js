@@ -4,6 +4,21 @@ export function weatherFresh(weather, now = Date.now()) {
     now >= weather.fetchedAt && now - weather.fetchedAt <= 45 * 60_000;
 }
 
+export const INDOOR_COMPARISON_MAX_AGE_MS = 90_000;
+
+// Shared by room cards and MCP. Freshness refers to retrieval, not measurement.
+export function indoorFresh(retrievedAt, now = Date.now()) {
+  const time = Date.parse(retrievedAt);
+  return Number.isFinite(time) && now >= time && now - time <= INDOOR_COMPARISON_MAX_AGE_MS;
+}
+
+export function temperatureDifference(room, retrievedAt, weather, now = Date.now()) {
+  if (room?.online !== true || !Number.isFinite(room.temperature) ||
+      !indoorFresh(retrievedAt, now) || !weatherFresh(weather, now) ||
+      !Number.isFinite(weather.current.temperature)) return null;
+  return room.temperature - weather.current.temperature;
+}
+
 export function outdoorSegments(points, metric, from, to) {
   const runs = [];
   let run = [];
