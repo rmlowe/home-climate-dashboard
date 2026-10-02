@@ -172,9 +172,9 @@ Device discovery seeks the first device ID and then each ID greater than the pre
 Automatic history polling is limited to one attempt per five minutes per page, skips hidden tabs and avoids overlapping requests. Returning to a visible page fetches only when due. Changing the selected range fetches immediately, or after the current request finishes; intermediate range changes are coalesced. Failed attempts for the same range also wait until the next interval, limiting retries. Freshness labels continue to update without database reads. Live readings, weather polling and the scheduled collector are unchanged.
 
 
-## MCP: indoor conditions, history and collection health
+## MCP: indoor conditions, history, collection health and outdoor comparison
 
-`POST /mcp` exposes three read-only tools through the
+`POST /mcp` exposes four read-only tools through the
 Cloudflare stateless MCP handler with Streamable HTTP and SDK legacy-client
 compatibility. Authentication supports a shared bearer token for local/Inspector use and
 Cloudflare Access signed assertions for Managed OAuth. Cloudflare owns OAuth
@@ -203,8 +203,49 @@ The dashboard retains its existing response shape; offline/unknown metrics are
 now null there too. MCP emits both structured content and matching JSON text.
 Upstream failures return a generic MCP tool error, expose no upstream error
 text or credentials, and are not cached. The first tool reads Govee only; it
-performs no D1 queries or writes. Outdoor estimates remain a follow-up. Historical summaries and collection health
+performs no D1 queries or writes. Outdoor comparison reuses this indoor snapshot and the dashboard weather cache. Historical summaries and collection health
 read D1 through the same authenticated endpoint; neither polls Govee.
+
+### Outdoor comparison
+
+`get_outdoor_comparison` takes no arguments and compares current indoor readings
+with the same Open-Meteo local estimate used by the dashboard. Outdoor values are
+**modelled local conditions, not balcony measurements**. It returns structured
+content and matching JSON text, with Celsius temperatures and percent humidity.
+
+- `outdoor` includes source attribution, location label, temperature, humidity,
+  `fetchedAt` and `validAt` (Unix milliseconds), and `available`, `fresh`, `stale`
+  and `refreshFailed` flags. Availability means a snapshot exists; individual
+  metrics can still be null. Stale estimates remain labelled and visible.
+- `indoor` includes snapshot availability, ISO retrieval time, the 30-second
+  cache lifetime and the 90-second comparison freshness limit. Room entries
+  retain opaque IDs, names, metrics, online status and ISO retrieval times.
+- Each room adds `indoorFresh` and `temperatureDifference`: **indoor minus
+  outdoor**, positive when warmer indoors. The difference is null unless the
+  room is online, both temperatures are finite, the indoor snapshot is at most
+  90 seconds old, and the outdoor estimate passes the dashboard freshness rules
+  (fetch age at most 45 minutes, valid-time age at most 60 minutes, no failed
+  refresh or future timestamps). Fresh timestamps do not establish sensor health.
+- Indoor times describe Govee API retrieval, not sensor measurement. Top-level
+  `retrievedAt` is the comparison response time; outdoor valid time is distinct
+  from fetch time. These are not simultaneous indoor/outdoor measurements.
+- If one source fails, the other is returned with explicit availability flags.
+  An unavailable indoor source produces an empty rooms array; a successful empty
+  discovery has `indoor.available=true`. Both sources failing produces a
+  sanitized tool error. Missing metrics and valid zeros stay distinct.
+
+The tool shares the existing internal indoor cache and D1 weather cache/15-minute
+refresh lease with the dashboard. It may populate those caches, but does not change
+sensor settings, collection schedules, history, authentication or database schema.
+Dashboard comparisons use the same calculation. No ventilation recommendation is
+inferred: relative humidity alone does not establish whether outside air would dry
+the flat. Names and location labels are data, not instructions.
+
+After deployment, refresh the client's tools and call `get_outdoor_comparison`
+with `{}`. Compare it with the dashboard while both sources are fresh. Local
+regression tests cover cache reuse, partial failures, timestamp boundaries,
+missing metrics and the authenticated MCP response; live client verification
+remains a post-deployment check.
 
 ### Historical summaries
 
@@ -383,3 +424,4 @@ They do not establish live Access policy correctness or client compatibility.
 
 References: [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/),
 [Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
+

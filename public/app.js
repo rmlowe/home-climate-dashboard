@@ -1,18 +1,19 @@
+import { temperatureDifference } from './weather-model.js';
+
 const roomsEl = document.querySelector("#rooms");
 const updatedEl = document.querySelector("#updated");
 const errorEl = document.querySelector("#error");
 
 let outside;
 let outsideFresh = false;
-let indoorsAt = 0;
+let indoorsAt = null;
 function renderComparisons() {
   for (const el of roomsEl.querySelectorAll('.outdoor-comparison')) {
     const temperature = Number(el.dataset.temperature);
-    const usable = outsideFresh && Date.now() - indoorsAt <= 90_000 && Number.isFinite(temperature) &&
-      el.dataset.online === 'true' && Number.isFinite(outside?.current?.temperature);
-    el.hidden = !usable;
-    if (usable) {
-      const delta = temperature - outside.current.temperature;
+    const delta = temperatureDifference({ temperature, online: el.dataset.online === 'true' },
+      indoorsAt, outsideFresh ? outside : null);
+    el.hidden = delta === null;
+    if (delta !== null) {
       el.textContent = Math.abs(delta) < 0.05 ? 'Same as outside estimate' :
         `${Math.abs(delta).toFixed(1)}°C ${delta > 0 ? 'warmer' : 'cooler'} than outside estimate`;
     }
@@ -29,7 +30,7 @@ async function refresh() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
-    indoorsAt = Date.parse(data.updated);
+    indoorsAt = data.updated;
     renderRooms(data.rooms ?? []);
     renderComparisons();
 
@@ -43,7 +44,7 @@ async function refresh() {
     errorEl.hidden = true;
   } catch (error) {
     console.error(error);
-    indoorsAt = 0; renderComparisons();
+    indoorsAt = null; renderComparisons();
     errorEl.textContent = "Unable to refresh the Govee readings right now.";
     errorEl.hidden = false;
   }

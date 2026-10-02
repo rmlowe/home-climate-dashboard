@@ -1,6 +1,8 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
+import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 
 const realFetch = globalThis.fetch;
 const realCaches = globalThis.caches;
@@ -16,8 +18,8 @@ function request(method = 'tools/list', params = {}, headers = {}) {
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
 }
-async function rpc(method, params = {}) {
-  const response = await worker.fetch(request(method, params), env, ctx);
+async function rpc(method, params = {}, config = env) {
+  const response = await worker.fetch(request(method, params), config, ctx);
   assert.equal(response.status, 200, await (response.status !== 200 ? response.clone().text() : Promise.resolve('')));
   assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
   const text = await response.text();
@@ -57,11 +59,11 @@ test('MCP is disabled without a strong token and rejects unauthorized requests b
   assert.equal((await worker.fetch(request('tools/list', {}, { Origin: 'https://evil.example' }), env, ctx)).status, 403);
 });
 
-test('SDK handshake and discovery expose three read-only tools', async () => {
+test('SDK handshake and discovery expose four read-only tools', async () => {
   const init = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result.serverInfo.name, 'home-climate');
   const listed = await rpc('tools/list');
-  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health']);
+  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health', 'get_outdoor_comparison']);
   assert.ok(listed.result.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
 });
 
@@ -113,9 +115,68 @@ test('upstream failure returns a sanitized tool error and is not cached', async 
 
 test('unknown tools and unexpected arguments do not fetch readings', async () => {
   const state = setup();
-  for (const params of [ { name: 'set_temperature', arguments: {} }, { name: 'get_current_conditions', arguments: { room: 'anything' } } ]) {
+  for (const params of [ { name: 'set_temperature', arguments: {} }, { name: 'get_current_conditions', arguments: { room: 'anything' } }, { name: 'get_outdoor_comparison', arguments: { latitude: 1 } } ]) {
     const message = await rpc('tools/call', params);
     assert.ok(message.error || message.result?.isError);
   }
   assert.equal(state.requests(), 0);
+});
+
+
+test('outdoor tool shares weather and indoor caches with dashboard and returns matching structured/text data', async t => {
+  const state = setup();
+  const goveeFetch = globalThis.fetch;
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(readFileSync(new URL('../migrations/0003_weather_cache.sql', import.meta.url), 'utf8'));
+  t.after(() => sqlite.close());
+  const config = { ...env, WEATHER_LATITUDE: '51.61', WEATHER_LONGITUDE: '-0.21', WEATHER_LOCATION_NAME: 'Mill Hill East', DB: {
+    prepare(sql) { const statement = sqlite.prepare(sql); return { bind(...args) { return {
+      async first() { return statement.get(...args) ?? null; }, async run() { return statement.run(...args); },
+    }; } }; },
+  } };
+  let weatherCalls = 0;
+  globalThis.fetch = async (url, init) => {
+    if (!url.startsWith('https://api.open-meteo.com/')) return goveeFetch(url, init);
+    weatherCalls++;
+    assert.equal(init.headers, undefined);
+    const time = Math.floor(Date.now() / 1000);
+    const units = { time: 'unixtime', temperature_2m: '°C', relative_humidity_2m: '%' };
+    return Response.json({ current_units: units, hourly_units: units,
+      current: { time, temperature_2m: 18, relative_humidity_2m: 65 },
+      hourly: { time: [time], temperature_2m: [18], relative_humidity_2m: [65] } });
+  };
+  const result = (await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} }, config)).result;
+  assert.notEqual(result.isError, true);
+  const data = result.structuredContent;
+  assert.equal(data.rooms[0].temperatureDifference, 7);
+  assert.equal(data.outdoor.fresh, true);
+  assert.equal(data.outdoor.location, 'Mill Hill East');
+  assert.deepEqual(JSON.parse(result.content[0].text), data);
+  assert.doesNotMatch(JSON.stringify(result), /secret-device|private-govee-key/);
+  const outdoor = await (await worker.fetch(new Request('http://localhost/api/weather'), config, ctx)).json();
+  const indoor = await (await worker.fetch(new Request('http://localhost/api/readings'), config, ctx)).json();
+  assert.equal(outdoor.fetchedAt, data.outdoor.fetchedAt);
+  assert.equal(outdoor.current.temperature, data.outdoor.temperature);
+  assert.equal(indoor.rooms[0].temperature - outdoor.current.temperature, data.rooms[0].temperatureDifference);
+  await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} }, config);
+  assert.equal(weatherCalls, 1);
+  assert.equal(state.requests(), 2);
+  // Cached weather remains usable even when Govee configuration is unavailable.
+  const partial = (await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} },
+    { ...config, GOVEE_API_KEY: undefined })).result.structuredContent;
+  assert.equal(partial.indoor.available, false);
+  assert.equal(partial.outdoor.available, true);
+  assert.deepEqual(partial.rooms, []);
+});
+
+test('outdoor tool tolerates missing weather and sanitizes total failure', async () => {
+  setup();
+  const partial = (await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} })).result.structuredContent;
+  assert.equal(partial.indoor.available, true);
+  assert.equal(partial.outdoor.available, false);
+  assert.equal(partial.rooms[0].temperatureDifference, null);
+  setup([new Error('private-govee-key secret-device-0')]);
+  const result = (await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} })).result;
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(JSON.stringify(result), /private-govee-key|secret-device/);
 });
