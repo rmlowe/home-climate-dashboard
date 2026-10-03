@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { summaryTable } from '../public/summary-table.js';
+import { comparisonTable } from '../public/comparison-table.js';
 import { chart, decimate, segments } from '../public/chart.js';
 
 // Minimal DOM adapter for testing node counts and lazy table interactions without a browser.
@@ -27,6 +28,27 @@ class Node {
 const intervalMs = 300_000, to = Date.UTC(2026, 8, 15), from = to - 7 * 86_400_000;
 const points = Array.from({ length: 2017 }, (_, i) => ({ scheduledAt: from + i * intervalMs,
   collectedAt: from + i * intervalMs, temperature: 20 + Math.sin(i), humidity: 45, online: true }));
+
+test('comparison table renders paired coverage, missing archive and stored week overlays', t => {
+  const previous = globalThis.document;
+  globalThis.document = { createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
+    querySelector: () => ({ clientWidth: 360 }) };
+  t.after(() => { globalThis.document = previous; });
+  const room = { name: 'Bedroom', points };
+  const data = { from, to, intervalMs, outdoor: { available: true, kind: 'modelled_local_estimate',
+    attribution: 'Weather data by Open-Meteo (CC BY 4.0)', points: [
+      { validAt: from, temperature: 10, humidity: 70 }, { validAt: from + 3_600_000, temperature: 12, humidity: 60 },
+    ] } };
+  const rows = comparisonTable(room, data).all('tbody')[0].children;
+  assert.match(rows[3].children[1].textContent, /^2\/168 hours/);
+  const absent = comparisonTable(room, { ...data, outdoor: { available: false } });
+  assert.equal(absent.all('table').length, 0);
+  assert.match(absent.all('p')[0].textContent, /unavailable/);
+  const figure = chart(room, 'temperature', data, data.outdoor);
+  assert.ok(figure.all('path').length >= 2);
+  assert.ok(figure.all('p').some(p => /Stored hourly estimates/.test(p.textContent)));
+  assert.ok(!figure.all('p').some(p => /recent 24 hours only/.test(p.textContent)));
+});
 
 test('decimation reduces dense data while preserving endpoints, extrema and separate gaps', () => {
   const run = points.map(p => ({ ...p, temperature: 20 }));

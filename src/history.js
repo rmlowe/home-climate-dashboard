@@ -1,3 +1,5 @@
+import { readOutdoorHistory } from './weather-history.js';
+
 const DAY = 86_400_000;
 const SLOT = 300_000;
 
@@ -94,7 +96,11 @@ export async function handleHistory(request, env) {
     { status: 400, headers });
   if (!env.DB) return Response.json({ error: 'History storage is not configured' }, { status: 503, headers });
   try {
-    return Response.json(await readHistory(env.DB, Date.now(), range), { headers });
+    const history = await readHistory(env.DB, Date.now(), range);
+    // An unavailable archive must not hide indoor history.
+    try { history.outdoor = await readOutdoorHistory(env, history.from, history.to); }
+    catch { history.outdoor = { available: false, points: [] }; }
+    return Response.json(history, { headers });
   } catch (error) {
     console.error('Unable to read history', error);
     return Response.json({ error: 'Unable to retrieve history' }, { status: 503, headers });

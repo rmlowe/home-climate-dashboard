@@ -17,8 +17,10 @@ function fixture(time = now) {
 function environment(t) {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0003_weather_cache.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0004_weather_history.sql', import.meta.url), 'utf8'));
   t.after(() => sqlite.close());
   return { WEATHER_LATITUDE: '51.61', WEATHER_LONGITUDE: '-0.21', WEATHER_LOCATION_NAME: 'Mill Hill East', DB: {
+    async batch(statements) { return Promise.all(statements.map(s => s.run())); },
     prepare(sql) { const statement = sqlite.prepare(sql);
       return { bind(...args) { return { async first() { return statement.get(...args) ?? null; },
         async run() { return statement.run(...args); } }; } }; }
@@ -51,6 +53,8 @@ test('shared cache fetches at most every 15 minutes and keeps timestamps separat
   };
   const first = await readWeather(env, now + 1000, fetcher);
   assert.equal(first.current.validAt, now); assert.equal(first.fetchedAt, now + 1000);
+  const archived = await env.DB.prepare('SELECT COUNT(*) AS count FROM weather_history WHERE location_key = ?').bind('51.61,-0.21').first();
+  assert.equal(archived.count, 2);
   await Promise.all([readWeather(env, now + 2000, fetcher), readWeather(env, now + 3000, fetcher)]);
   assert.equal(calls, 1);
   await readWeather(env, now + 15 * 60_000 + 1000, fetcher); assert.equal(calls, 2);

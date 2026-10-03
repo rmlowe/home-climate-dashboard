@@ -1,3 +1,5 @@
+import { archiveWeather } from './weather-history.js';
+
 const REFRESH_MS = 15 * 60_000;
 const DAY = 86_400_000;
 
@@ -31,7 +33,7 @@ export function parseWeather(body, fetchedAt) {
 }
 
 // A persisted 15-minute attempt lease prevents per-viewer requests and retry storms.
-// Failures leave the last successful snapshot intact. This is a cache, not a weather archive.
+// Failures leave the last successful snapshot intact. Hourly history is archived separately.
 export async function readWeather(env, now = Date.now(), fetcher = fetch) {
   if (!env.DB) throw new Error('Weather storage is not configured');
   const location = weatherLocation(env);
@@ -48,7 +50,9 @@ export async function readWeather(env, now = Date.now(), fetcher = fetch) {
         past_days: '2', forecast_days: '1', temperature_unit: 'celsius', timezone: 'GMT', timeformat: 'unixtime' });
       const response = await fetcher(url.toString(), { signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`Weather HTTP ${response.status}`);
-      const payload = JSON.stringify(parseWeather(await response.json(), now));
+      const parsed = parseWeather(await response.json(), now);
+      await archiveWeather(env.DB, location.key, parsed);
+      const payload = JSON.stringify(parsed);
       await env.DB.prepare('UPDATE weather_cache SET payload = ? WHERE location_key = ? AND attempted_at = ?')
         .bind(payload, location.key, now).run();
       row = { payload };

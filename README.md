@@ -89,7 +89,7 @@ Migration `0002_collection_time_index.sql` adds an index on `(device_id, collect
 
 ### Outdoor weather comparison
 
-The dashboard shows an **Outside · local estimate** summary and green dashed outdoor lines on both 24-hour charts. Room cards show the temperature difference only while indoor and outdoor data are fresh. These are modelled local conditions from [Open-Meteo](https://open-meteo.com/), not balcony measurements. Weather data is attributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The free endpoint is intended for non-commercial use; see [API documentation](https://open-meteo.com/en/docs) and [terms](https://open-meteo.com/en/terms).
+The dashboard shows an **Outside · local estimate** summary and green dashed outdoor lines on the 24-hour and seven-day charts. Room cards show the temperature difference only while indoor and outdoor data are fresh. These are modelled local conditions from [Open-Meteo](https://open-meteo.com/), not balcony measurements. Weather data is attributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The free endpoint is intended for non-commercial use; see [API documentation](https://open-meteo.com/en/docs) and [terms](https://open-meteo.com/en/terms).
 
 `WEATHER_LATITUDE`, `WEATHER_LONGITUDE` and `WEATHER_LOCATION_NAME` configure the location in `wrangler.jsonc`. Defaults are approximate Mill Hill East coordinates (51.61, -0.21), not a precise home address. The Worker sends these coordinates to Open-Meteo; no Govee credentials or sensor identifiers are sent. No weather API key is needed.
 
@@ -97,7 +97,7 @@ The dashboard shows an **Outside · local estimate** summary and green dashed ou
 
 The existing five-minute cron also checks weather every third slot. Dashboard requests can populate an empty cache or refresh an overdue one, so preview URLs work without their own cron. A D1 attempt lease limits upstream requests to at most one per 15 minutes per location across cron and viewers, including after failures (normally up to 96/day). Failed refreshes retain the previous successful payload. The API is private/no-store and the service worker excludes it.
 
-This stores a bounded snapshot of recent hourly estimates, **not a permanent outdoor archive**. Later model updates may revise the recent series. The first successful request supplies the preceding day immediately; indoor history remains unchanged.
+The live endpoint retains its bounded cache. Successful refreshes also persist hourly estimates in a separate `weather_history` archive. The first refresh seeds up to the preceding 48 hours supplied by the existing request; the seven-day view fills as collection continues. This makes no extra upstream requests. It does not manufacture a full historical week. Later fetches may revise recent hourly estimates; each archived row retains its latest fetch time.
 
 Before previewing or deploying, apply migration `0003_weather_cache.sql` using the normal migration command. On mobile, run this directly in **D1 → home-climate-history → Console**:
 
@@ -110,6 +110,47 @@ CREATE TABLE IF NOT EXISTS weather_cache (
 ```
 
 Verify with `PRAGMA table_info('weather_cache');`. This only creates a separate cache table. Running the Wrangler migration later is safe because it also uses `IF NOT EXISTS`. Until the table exists, outdoor data returns 503 and indoor functionality continues normally. Preview and production share the configured database and weather cache.
+
+### Persistent outdoor history and historical comparisons
+
+**Deployment prerequisite:** apply `0004_weather_history.sql` before deploying this version (including previews, which share the production database):
+
+```sh
+npx wrangler d1 migrations apply home-climate-history --remote
+```
+
+Alternatively, run the following in **D1 → home-climate-history → Console**:
+
+```sql
+CREATE TABLE IF NOT EXISTS weather_history (
+  location_key TEXT NOT NULL,
+  valid_at INTEGER NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  temperature_c REAL,
+  humidity_percent REAL,
+  PRIMARY KEY (location_key, valid_at)
+);
+```
+
+Verify with `PRAGMA table_info('weather_history');`. The migration is additive and idempotent; it does not change indoor readings or the weather cache. Rolling back the Worker can leave the table in place. Without this table, new weather refreshes fail and retain any previous cached snapshot; indoor collection and history remain available.
+
+The archive stores hourly Open-Meteo model estimates, isolated by configured coordinates. Only hours at or before retrieval time are stored; the separate current-weather series and future forecasts are excluded. Repeated retrievals update a row only when `fetched_at` is newer, so a delayed write cannot replace a newer revision. A model revision may replace a metric with null, which correctly creates a gap. There is no retention deletion; growth is approximately 24 rows/day/location, although recent rows are updated each refresh. A long outage may leave gaps beyond the upstream request's 48-hour lookback. Changing coordinates starts a separate series.
+
+`GET /api/history?range=24h` (or `7d`) adds `outdoor`, with source/attribution, location, hourly `intervalMs`, and `points` containing `validAt`, `fetchedAt`, `temperature` and `humidity`. An empty archive returns `available: true` with no points; unavailable archive/configuration returns `available: false` and no points while retaining indoor history. It is a database-only read. For partial first hours, the returned outdoor series includes the hour-start estimate immediately before `from`; charts clip to the selected window.
+
+The authenticated MCP tool `get_history_comparison({from?, to?})` uses the same archive. Omit both arguments for the last 24 hours, or provide both ISO timestamps with explicit `Z`/UTC offsets for a positive window within the last seven days. For example:
+
+```json
+{"from":"2026-10-02T23:00:00+01:00","to":"2026-10-03T08:00:00+01:00"}
+```
+
+It returns source provenance, archive valid/fetch time bounds, and per-room `temperature` and `dewPoint` comparisons. Each contains `availableIndoorHours`, `availableOutdoorHours`, and `indoor`, `outdoor`, `difference` statistics over **the same paired hours**. Statistics include min/max/mean, first/last/change, first/last UTC hour, valid/expected hour counts, coverage and longest missing run. Differences are indoor minus outdoor, in Celsius. Null values mean no valid statistic; a single paired hour has no change. Storage failure returns a sanitized tool error, distinct from empty history. Existing MCP tools and authentication are unchanged.
+
+Indoor online samples within `[from, to)` are averaged by UTC hour and paired with the estimate valid at that hour's start. Partial edge hours count in coverage. The estimate and indoor samples can be up to 60 minutes apart: this is hourly alignment, not simultaneous measurement. Missing hours are neither interpolated nor carried forward. Each paired hour has equal statistical weight, irrespective of sample count; hourly coverage does not establish complete within-hour sampling. Use `get_collection_health` for five-minute indoor coverage. `firstHour`/`lastHour` are bucket starts, not sensor measurement times. Model retrieval can occur after the requested historical window and recent estimates can change on later queries.
+
+Dew point uses the Magnus approximation over liquid water (`a=17.625`, `b=243.04°C`) for each valid temperature/RH pair before indoor hourly averaging. RH=0 has no finite dew point and is omitted from that comparison, while zero temperature remains valid. Dew-point differences describe moisture more usefully than comparing relative humidity at different temperatures, but are approximate and are not ventilation advice or evidence that a window/heating change caused an observed trend.
+
+After deployment: verify `weather_history` gains rows, check the 24-hour and seven-day dashboard views, refresh MCP discovery, and call `get_history_comparison`. Expect incomplete initial coverage rather than a full seven-day archive. No production migration or deployment is performed by the PR itself.
 
 ### Tests
 
@@ -163,7 +204,7 @@ References: [D1 setup](https://developers.cloudflare.com/d1/get-started/), [D1 m
 
 ## Current scope
 
-The dashboard shows current readings and selectable 24-hour or seven-day indoor history, with per-chart min/max values and freshness status. Daily indoor temperature summaries use browser-local calendar days, including daylight-saving transitions. Coverage counts distinct five-minute collection-time periods with an online, finite temperature, relative to the portion of each day inside the selected window. Missing days remain visible; partial days are labelled. Min/max values describe available samples, not guaranteed daily extremes. Outdoor overlays retain their recent 24-hour coverage and are labelled accordingly in the seven-day view. No database migration is needed for these longer indoor views. Future additions could include longer outdoor history, overnight cooling summaries, comfort indicators and alerts.
+The dashboard shows current readings and selectable 24-hour or seven-day indoor history, with per-chart min/max values and freshness status. Daily indoor temperature summaries use browser-local calendar days, including daylight-saving transitions. Coverage counts distinct five-minute collection-time periods with an online, finite temperature, relative to the portion of each day inside the selected window. Missing days remain visible; partial days are labelled. Min/max values describe available samples, not guaranteed daily extremes. Outdoor overlays use the persistent archive over the selected window, with a paired-hour indoor/outdoor temperature and dew-point comparison table. Apply migration `0004_weather_history.sql` before deploying this outdoor history update.
 
 ### History read usage
 
@@ -174,7 +215,7 @@ Automatic history polling is limited to one attempt per five minutes per page, s
 
 ## MCP: indoor conditions, history, collection health and outdoor comparison
 
-`POST /mcp` exposes four read-only tools through the
+`POST /mcp` exposes five read-only tools through the
 Cloudflare stateless MCP handler with Streamable HTTP and SDK legacy-client
 compatibility. Authentication supports a shared bearer token for local/Inspector use and
 Cloudflare Access signed assertions for Managed OAuth. Cloudflare owns OAuth
