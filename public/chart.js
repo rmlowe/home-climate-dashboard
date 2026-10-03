@@ -76,8 +76,8 @@ export function chart(room, metric, data, weather, state = {}) {
   const legend = document.createElement('p');
   legend.className = 'chart-legend';
   legend.textContent = `${room.name}: solid · Outside estimate: green dashed` +
-    (period === '7 days' && outsideRuns.length ? ' · Outdoor coverage: recent 24 hours only' : '') +
-    (!outsideRuns.length ? ' · Outdoor history unavailable' : !weatherFresh(weather) ? ' · Outdoor update delayed' : '');
+    (!outsideRuns.length ? ' · Outdoor history unavailable' : weather?.kind === 'modelled_local_estimate'
+      ? ' · Stored hourly estimates; gaps remain unknown' : !weatherFresh(weather) ? ' · Outdoor update delayed' : '');
   figure.append(legend);
   if (!points.length) {
     const empty = document.createElement('p');

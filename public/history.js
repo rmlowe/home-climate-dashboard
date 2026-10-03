@@ -2,7 +2,7 @@ import { chart, freshness } from './chart.js';
 import { summaryTable } from './summary-table.js';
 import { dailyTable } from './daily.js';
 import { createHistoryPoller } from './history-polling.js';
-import { weather } from './weather.js';
+import { comparisonTable } from './comparison-table.js';
 
 const rangeSelect = document.querySelector('#history-range');
 const select = document.querySelector('#history-room');
@@ -32,7 +32,7 @@ function renderCharts() {
     open: detail.open, page: Number(detail.dataset.page || 0),
     focused: detail.contains(document.activeElement) ? document.activeElement.dataset.historyFocus : null,
   })) : [];
-  charts.replaceChildren(summaryTable(room, data), chart(room, 'temperature', data, weather, previous[0]), chart(room, 'humidity', data, weather, previous[1]), dailyTable(room, data));
+  charts.replaceChildren(comparisonTable(room, data), summaryTable(room, data), chart(room, 'temperature', data, data.outdoor, previous[0]), chart(room, 'humidity', data, data.outdoor, previous[1]), dailyTable(room, data));
   [...charts.querySelectorAll('details')].forEach((detail, index) => {
     const focused = previous[index]?.focused;
     if (focused) detail.querySelector(`[data-history-focus="${focused}"]`)?.focus({ preventScroll: true });
@@ -116,5 +116,3 @@ historyPoller.refresh();
 setInterval(() => historyPoller.refresh(), 30_000);
 setInterval(renderStatus, 30_000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) historyPoller.refresh(); });
-
-window.addEventListener('weather-updated', renderCharts);

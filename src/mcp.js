@@ -1,5 +1,6 @@
 import { registerHistoryTools } from './history-tools.js';
 import { registerOutdoorTool } from './outdoor-tool.js';
+import { registerComparisonTool } from './comparison-tool.js';
 import { mcpAuthConfig, authenticateMcp } from './mcp-auth.js';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
@@ -40,6 +41,7 @@ function createServer(request, env, ctx) {
   });
   registerHistoryTools(server, env);
   registerOutdoorTool(server, request, env, ctx);
+  registerComparisonTool(server, env);
   return server;
 }
 

@@ -59,11 +59,11 @@ test('MCP is disabled without a strong token and rejects unauthorized requests b
   assert.equal((await worker.fetch(request('tools/list', {}, { Origin: 'https://evil.example' }), env, ctx)).status, 403);
 });
 
-test('SDK handshake and discovery expose four read-only tools', async () => {
+test('SDK handshake and discovery expose five read-only tools', async () => {
   const init = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result.serverInfo.name, 'home-climate');
   const listed = await rpc('tools/list');
-  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health', 'get_outdoor_comparison']);
+  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health', 'get_outdoor_comparison', 'get_history_comparison']);
   assert.ok(listed.result.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
 });
 
@@ -128,8 +128,10 @@ test('outdoor tool shares weather and indoor caches with dashboard and returns m
   const goveeFetch = globalThis.fetch;
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0003_weather_cache.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0004_weather_history.sql', import.meta.url), 'utf8'));
   t.after(() => sqlite.close());
   const config = { ...env, WEATHER_LATITUDE: '51.61', WEATHER_LONGITUDE: '-0.21', WEATHER_LOCATION_NAME: 'Mill Hill East', DB: {
+    async batch(statements) { return Promise.all(statements.map(s => s.run())); },
     prepare(sql) { const statement = sqlite.prepare(sql); return { bind(...args) { return {
       async first() { return statement.get(...args) ?? null; }, async run() { return statement.run(...args); },
     }; } }; },
