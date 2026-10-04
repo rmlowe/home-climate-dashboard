@@ -31,6 +31,7 @@ test('page startup fetches live weather and renders outdoor panel and room diffe
   const now = Date.now(), calls = [];
   t.mock.method(globalThis, 'fetch', async url => {
     calls.push(url);
+    if (url === '/api/ventilation') return Response.json({ rooms: [{ id: 'bedroom', status: 'uncertain', summary: 'Waiting for confirmation.', cooling: 'unknown', drying: 'unknown', validUntil: now + 90_000, reasons: [] }] });
     if (url === '/api/readings') return Response.json({ updated: new Date(now).toISOString(),
       rooms: [{ id: 'bedroom', name: 'Bedroom', temperature: 22, humidity: 50, online: true }] });
     if (url === '/api/weather') return Response.json({ location: 'Local area', fetchedAt: now,
@@ -47,6 +48,10 @@ test('page startup fetches live weather and renders outdoor panel and room diffe
   assert.equal(document.querySelector('#outdoor-temperature').textContent, '15.0°C');
   assert.equal(document.querySelector('#weather-status').textContent, 'Local weather estimate');
   const comparison = document.querySelector('#rooms').querySelectorAll('.outdoor-comparison')[0];
+  assert.ok(calls.includes('/api/ventilation'));
+  const guidance = document.querySelector('#rooms').querySelectorAll('.ventilation-guidance')[0];
+  assert.equal(guidance.dataset.status, 'uncertain');
+  assert.equal(guidance.children[1].textContent, 'Waiting for confirmation.');
   assert.equal(comparison.hidden, false);
   assert.equal(comparison.textContent, '7.0°C warmer than outside estimate');
 });

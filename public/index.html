@@ -26,6 +26,13 @@
 
     <p id="error" class="error" hidden></p>
 
+    <details class="ventilation-about">
+      <summary>How window guidance works</summary>
+      <p>Guidance considers cooling and moisture separately, using local outdoor estimates and two recent indoor collections. Dew point compares moisture even when relative humidity percentages are misleading.</p>
+      <p>Your preferences: flag above 25°C or outside 40–60% humidity. No lower comfortable temperature is configured. Differences under 2°C in temperature or dew point are treated as small; these are provisional margins, not calibrated accuracy bounds.</p>
+      <p>Outdoor estimates may differ from your balcony. This is not a CO₂, air-quality or safety assessment. It does not predict how long to open a window or the resulting room conditions.</p>
+    </details>
+
     <section class="outdoor" aria-labelledby="outdoor-heading">
       <div class="outdoor-head"><h2 id="outdoor-heading">Outside · local estimate</h2><span id="weather-location">Mill Hill East</span></div>
       <div class="outdoor-values"><span>Temperature <strong id="outdoor-temperature">—</strong></span><span>Humidity <strong id="outdoor-humidity">—</strong></span></div>

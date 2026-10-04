@@ -1,3 +1,4 @@
+import { registerVentilationTool } from './ventilation-tool.js';
 import { registerHistoryTools } from './history-tools.js';
 import { registerOutdoorTool } from './outdoor-tool.js';
 import { registerComparisonTool } from './comparison-tool.js';
@@ -42,6 +43,7 @@ function createServer(request, env, ctx) {
   registerHistoryTools(server, env);
   registerOutdoorTool(server, request, env, ctx);
   registerComparisonTool(server, env);
+  registerVentilationTool(server, request, env, ctx);
   return server;
 }
 

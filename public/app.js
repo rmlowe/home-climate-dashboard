@@ -1,9 +1,29 @@
-import { temperatureDifference } from './weather-model.js';
+import { renderVentilationCard } from './ventilation-card.js';
+import { temperatureDifference, indoorFresh } from './weather-model.js';
 
 const roomsEl = document.querySelector("#rooms");
 const updatedEl = document.querySelector("#updated");
 const errorEl = document.querySelector("#error");
 
+let guidance = null;
+let refreshing = false;
+function renderGuidance() {
+  for (const el of roomsEl.querySelectorAll('.ventilation-guidance')) {
+    renderVentilationCard(el, el.dataset.online === 'true' && indoorFresh(indoorsAt)
+      ? guidance?.rooms.find(room => room.id === el.dataset.roomId) : null);
+  }
+}
+async function refreshGuidance() {
+  try {
+    const response = await fetch('/api/ventilation', { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const next = await response.json();
+    if (!Array.isArray(next.rooms)) throw new Error('Invalid guidance response');
+    guidance = next;
+  } catch { guidance = null; }
+  renderGuidance();
+}
+setInterval(renderGuidance, 10_000);
 let outside;
 let outsideFresh = false;
 let indoorsAt = null;
@@ -25,8 +45,10 @@ window.addEventListener('weather-updated', event => {
 setInterval(renderComparisons, 30_000);
 
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   try {
-    const response = await fetch("/api/readings", { cache: "no-store" });
+    const response = await fetch("/api/readings", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
@@ -42,12 +64,14 @@ async function refresh() {
     })}`;
 
     errorEl.hidden = true;
+    await refreshGuidance();
   } catch (error) {
     console.error(error);
     indoorsAt = null; renderComparisons();
+    guidance = null; renderGuidance();
     errorEl.textContent = "Unable to refresh the Govee readings right now.";
     errorEl.hidden = false;
-  }
+  } finally { refreshing = false; }
 }
 
 function renderRooms(rooms) {
@@ -94,7 +118,13 @@ function renderRooms(rooms) {
       comparison.className = 'outdoor-comparison'; comparison.hidden = true;
       comparison.dataset.temperature = Number.isFinite(room.temperature) ? String(room.temperature) : 'NaN';
       comparison.dataset.online = String(room.online === true);
-      card.append(comparison, shortcut);
+      const ventilation = document.createElement('section');
+      ventilation.className = 'ventilation-guidance';
+      ventilation.dataset.roomId = room.id;
+      ventilation.dataset.online = String(room.online === true);
+      renderVentilationCard(ventilation, room.online === true && indoorFresh(indoorsAt)
+        ? guidance?.rooms.find(item => item.id === room.id) : null);
+      card.append(comparison, ventilation, shortcut);
       return card;
     })
   );

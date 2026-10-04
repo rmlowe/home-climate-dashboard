@@ -59,11 +59,11 @@ test('MCP is disabled without a strong token and rejects unauthorized requests b
   assert.equal((await worker.fetch(request('tools/list', {}, { Origin: 'https://evil.example' }), env, ctx)).status, 403);
 });
 
-test('SDK handshake and discovery expose five read-only tools', async () => {
+test('SDK handshake and discovery expose six read-only tools', async () => {
   const init = await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result.serverInfo.name, 'home-climate');
   const listed = await rpc('tools/list');
-  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health', 'get_outdoor_comparison', 'get_history_comparison']);
+  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_current_conditions', 'get_history_summary', 'get_collection_health', 'get_outdoor_comparison', 'get_history_comparison', 'get_ventilation_guidance']);
   assert.ok(listed.result.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
 });
 
@@ -115,7 +115,7 @@ test('upstream failure returns a sanitized tool error and is not cached', async 
 
 test('unknown tools and unexpected arguments do not fetch readings', async () => {
   const state = setup();
-  for (const params of [ { name: 'set_temperature', arguments: {} }, { name: 'get_current_conditions', arguments: { room: 'anything' } }, { name: 'get_outdoor_comparison', arguments: { latitude: 1 } } ]) {
+  for (const params of [ { name: 'set_temperature', arguments: {} }, { name: 'get_ventilation_guidance', arguments: { duration: 7 } }, { name: 'get_current_conditions', arguments: { room: 'anything' } }, { name: 'get_outdoor_comparison', arguments: { latitude: 1 } } ]) {
     const message = await rpc('tools/call', params);
     assert.ok(message.error || message.result?.isError);
   }
@@ -127,14 +127,18 @@ test('outdoor tool shares weather and indoor caches with dashboard and returns m
   const state = setup();
   const goveeFetch = globalThis.fetch;
   const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(readFileSync(new URL('../migrations/0001_readings.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_collection_time_index.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0003_weather_cache.sql', import.meta.url), 'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0004_weather_history.sql', import.meta.url), 'utf8'));
   t.after(() => sqlite.close());
   const config = { ...env, WEATHER_LATITUDE: '51.61', WEATHER_LONGITUDE: '-0.21', WEATHER_LOCATION_NAME: 'Mill Hill East', DB: {
     async batch(statements) { return Promise.all(statements.map(s => s.run())); },
-    prepare(sql) { const statement = sqlite.prepare(sql); return { bind(...args) { return {
-      async first() { return statement.get(...args) ?? null; }, async run() { return statement.run(...args); },
-    }; } }; },
+    prepare(sql) { const statement = sqlite.prepare(sql);
+      const bound = (...args) => ({ async first() { return statement.get(...args) ?? null; },
+        async run() { return statement.run(...args); }, async all() { return { results: statement.all(...args) }; } });
+      return { ...bound(), bind: bound };
+    },
   } };
   let weatherCalls = 0;
   globalThis.fetch = async (url, init) => {
@@ -163,6 +167,24 @@ test('outdoor tool shares weather and indoor caches with dashboard and returns m
   await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} }, config);
   assert.equal(weatherCalls, 1);
   assert.equal(state.requests(), 2);
+  const insert = sqlite.prepare('INSERT INTO readings VALUES (?, ?, ?, ?, ?, ?, ?)');
+  const clock = Date.now();
+  for (const age of [600_000, 300_000]) insert.run(JSON.stringify(['H5179', 'secret-device-0']), clock - age, clock - age, 'Old room name', 25, 45, 1);
+  const guidance = (await rpc('tools/call', { name: 'get_ventilation_guidance', arguments: {} }, config)).result;
+  assert.notEqual(guidance.isError, true);
+  assert.equal(guidance.structuredContent.historyAvailable, true);
+  assert.equal(guidance.structuredContent.rooms[0].confirmation.confirmed, true);
+  assert.equal(guidance.structuredContent.rooms[0].status, 'within_preferences');
+  assert.equal(guidance.structuredContent.rooms[0].name, 'Room 0', 'stable ID joins renamed rooms');
+  const dashboardGuidance = await (await worker.fetch(new Request('http://localhost/api/ventilation'), config, ctx)).json();
+  assert.deepEqual(dashboardGuidance.rooms, guidance.structuredContent.rooms);
+  assert.doesNotMatch(JSON.stringify(guidance), /secret-device|private-govee-key/);
+  assert.equal(weatherCalls, 1);
+  assert.equal(state.requests(), 2);
+  sqlite.exec('DROP TABLE readings');
+  const noHistory = (await rpc('tools/call', { name: 'get_ventilation_guidance', arguments: {} }, config)).result;
+  assert.equal(noHistory.structuredContent.historyAvailable, false);
+  assert.equal(noHistory.structuredContent.rooms[0].status, 'uncertain');
   // Cached weather remains usable even when Govee configuration is unavailable.
   const partial = (await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} },
     { ...config, GOVEE_API_KEY: undefined })).result.structuredContent;
@@ -181,4 +203,34 @@ test('outdoor tool tolerates missing weather and sanitizes total failure', async
   const result = (await rpc('tools/call', { name: 'get_outdoor_comparison', arguments: {} })).result;
   assert.equal(result.isError, true);
   assert.doesNotMatch(JSON.stringify(result), /private-govee-key|secret-device/);
+});
+
+test('ventilation MCP and dashboard agree; missing weather and history remain explicit', async () => {
+  setup();
+  const result = (await rpc('tools/call', { name: 'get_ventilation_guidance', arguments: {} })).result;
+  assert.notEqual(result.isError, true);
+  const data = result.structuredContent;
+  assert.equal(data.indoorAvailable, true);
+  assert.equal(data.historyAvailable, false);
+  assert.equal(data.outdoor.available, false);
+  assert.equal(data.rooms[0].status, 'unavailable');
+  assert.deepEqual(JSON.parse(result.content[0].text), data);
+  assert.doesNotMatch(JSON.stringify(result), /secret-device|private-govee-key/);
+  const response = await worker.fetch(new Request('http://localhost/api/ventilation'), env, ctx);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'private, no-store');
+  assert.deepEqual((await response.json()).rooms, data.rooms);
+  const invalid = await worker.fetch(new Request('http://localhost/api/ventilation', { method: 'POST' }), env, ctx);
+  assert.equal(invalid.status, 405);
+  assert.equal(invalid.headers.get('Allow'), 'GET');
+});
+
+test('ventilation total failure is sanitized in MCP and HTTP', async () => {
+  setup([new Error('private-govee-key secret-device-0')]);
+  const result = (await rpc('tools/call', { name: 'get_ventilation_guidance', arguments: {} })).result;
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(JSON.stringify(result), /private-govee-key|secret-device/);
+  const response = await worker.fetch(new Request('http://localhost/api/ventilation'), env, ctx);
+  assert.equal(response.status, 503);
+  assert.doesNotMatch(await response.text(), /private-govee-key|secret-device/);
 });

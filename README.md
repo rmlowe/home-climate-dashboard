@@ -466,3 +466,45 @@ They do not establish live Access policy correctness or client compatibility.
 References: [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/),
 [Managed OAuth](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/).
 
+
+### Window guidance
+
+`GET /api/ventilation` and the read-only MCP tool `get_ventilation_guidance({})`
+return the same assessment used by each dashboard room card. No new secrets,
+configuration or database migration are required. Refresh MCP tools after deployment.
+
+The response includes per-room `status`, `summary`, `reasons`, `cooling`, `drying`,
+indoor/outdoor dew points and signed indoor-minus-outdoor differences (°C).
+`validUntil` is an expiry, not a forecast. All numeric timestamps are Unix milliseconds.
+Outdoor provenance and freshness are included. Source failures are independent;
+missing history produces uncertain guidance, and missing/invalid/stale current
+inputs produce unavailable guidance. Total current-source failure returns HTTP 503
+or a sanitized MCP error. Room names remain untrusted data.
+
+Rules live in `src/ventilation.js` and use the existing Magnus dew-point function.
+Defaults are preference thresholds of >25°C, <40% or >60% RH, with no lower
+comfortable temperature configured. Temperature and dew-point margins are both
+2°C; these are conservative provisional product choices, not validated sensor
+error bounds. Cooling of at least 5°C is described as substantial where it is a
+trade-off. RH=0 cannot yield a finite dew point and suppresses guidance.
+
+A conclusion must also agree with the last two distinct indoor collections in
+12 minutes, at least four minutes apart, with the latest no older than seven
+minutes. Invalid/offline samples interrupt confirmation. These stored readings
+are compared with the **current** outdoor estimate, so this is indoor confirmation,
+not evidence of outdoor stability or a causal effect of opening a window. This
+avoids counting repeated cached API calls as independent readings. Threshold
+crossings temporarily yield uncertainty until confirmed; no process-local state
+or client-specific hysteresis is used. The short history read uses existing
+per-device time indexes and does not fetch the outdoor archive.
+
+The UI refreshes guidance after its indoor fetch, reusing the 30-second current
+cache and weather cache. It clears guidance on refresh failure and checks expiry
+between polls. A versioned service-worker cache ships the new UI module. Dashboard
+API access continues to rely on the existing Cloudflare Access application, and
+MCP keeps its existing endpoint authentication.
+
+This is temperature/moisture comfort guidance, not a CO2, air-quality, condensation
+or safety assessment. It does not prescribe window duration, predict final room
+humidity, or infer that a window is open. Drying and cooling can conflict. Even
+when drying succeeds, relative humidity can temporarily rise as air cools.

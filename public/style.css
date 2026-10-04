@@ -106,7 +106,7 @@ h1 {
 }
 
 @media (min-width: 700px) {
-  .cards { grid-template-columns: repeat(3, 1fr); }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .readings { grid-template-columns: 1fr; }
 }
 
@@ -170,3 +170,13 @@ h1 {
 .period-summary table { table-layout: fixed; font-size: 14px; }
 .period-summary th, .period-summary td { overflow-wrap: anywhere; }
 .period-summary th:first-child { width: 28%; }
+
+.ventilation-guidance { margin-top: 18px; padding-top: 14px; border-top: 1px solid #dfe5e9; overflow-wrap: anywhere; }
+.ventilation-guidance h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; }
+.ventilation-guidance p { margin: 8px 0; font-size: 13px; line-height: 1.5; color: #46505e; }
+.ventilation-guidance .ventilation-effects { font-weight: 650; }
+.ventilation-guidance[data-status="tradeoff"] .ventilation-effects { color: #875000; }
+.ventilation-guidance[data-status="helpful"] .ventilation-effects { color: #17654f; }
+.ventilation-guidance .ventilation-values { font-size: 12px; }
+.ventilation-about { margin-top: 16px; color: #59616d; font-size: 13px; line-height: 1.5; }
+.ventilation-about summary { cursor: pointer; padding: 10px 0; min-height: 44px; }
