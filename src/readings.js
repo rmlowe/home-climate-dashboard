@@ -48,7 +48,7 @@ export async function handleReadings(request, env, ctx) {
     // Preserve the dashboard's response shape and boolean online field.
     return Response.json({
       updated: snapshot.retrievedAt,
-      rooms: snapshot.rooms.map(({ retrievedAt, online, ...room }) => ({ ...room, online: online === true })),
+      rooms: snapshot.rooms.map(({ online, ...room }) => ({ ...room, online: online === true })),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch {
     return Response.json({ error: 'Unable to retrieve Govee readings' }, { status: 502 });

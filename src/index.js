@@ -1,3 +1,4 @@
+import { handleVentilation } from './ventilation-tool.js';
 import { handleReadings } from "./readings.js";
 import { handleMcp } from "./mcp.js";
 import { collectReadings } from "./collector.js";
@@ -18,6 +19,8 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/mcp") return handleMcp(request, env, ctx);
+
+    if (url.pathname === "/api/ventilation") return handleVentilation(request, env, ctx);
 
     if (url.pathname === "/api/weather") return handleWeather(request, env);
 

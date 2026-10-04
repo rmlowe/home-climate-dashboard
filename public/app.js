@@ -1,9 +1,31 @@
-import { temperatureDifference } from './weather-model.js';
+import { renderVentilationCard, matchingGuidance } from './ventilation-card.js';
+import { temperatureDifference, indoorFresh } from './weather-model.js';
 
 const roomsEl = document.querySelector("#rooms");
 const updatedEl = document.querySelector("#updated");
 const errorEl = document.querySelector("#error");
 
+let guidance = null;
+let displayedRooms = new Map();
+let refreshing = false;
+function renderGuidance() {
+  for (const el of roomsEl.querySelectorAll('.ventilation-guidance')) {
+    renderVentilationCard(el, el.dataset.online === 'true' && indoorFresh(indoorsAt)
+      ? matchingGuidance(displayedRooms.get(el.dataset.roomId),
+        guidance?.rooms.find(room => room.id === el.dataset.roomId)) : null);
+  }
+}
+async function refreshGuidance() {
+  try {
+    const response = await fetch('/api/ventilation', { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const next = await response.json();
+    if (!Array.isArray(next.rooms)) throw new Error('Invalid guidance response');
+    guidance = next;
+  } catch { guidance = null; }
+  renderGuidance();
+}
+setInterval(renderGuidance, 10_000);
 let outside;
 let outsideFresh = false;
 let indoorsAt = null;
@@ -25,12 +47,16 @@ window.addEventListener('weather-updated', event => {
 setInterval(renderComparisons, 30_000);
 
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   try {
-    const response = await fetch("/api/readings", { cache: "no-store" });
+    const response = await fetch("/api/readings", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
+    if (indoorsAt !== data.updated) guidance = null;
     indoorsAt = data.updated;
+    displayedRooms = new Map((data.rooms ?? []).map(room => [room.id, room]));
     renderRooms(data.rooms ?? []);
     renderComparisons();
 
@@ -42,16 +68,21 @@ async function refresh() {
     })}`;
 
     errorEl.hidden = true;
+    await refreshGuidance();
   } catch (error) {
     console.error(error);
     indoorsAt = null; renderComparisons();
+    guidance = null; renderGuidance();
     errorEl.textContent = "Unable to refresh the Govee readings right now.";
     errorEl.hidden = false;
-  }
+  } finally { refreshing = false; }
 }
 
 function renderRooms(rooms) {
   const focusedRoom = document.activeElement?.dataset.historyId;
+  const focusedGuidance = document.activeElement?.dataset.ventilationId;
+  const expandedRooms = new Set([...roomsEl.querySelectorAll('.ventilation-guidance')]
+    .filter(el => el.open).map(el => el.dataset.roomId));
   roomsEl.replaceChildren(
     ...rooms.map((room) => {
       const card = document.createElement("article");
@@ -94,10 +125,24 @@ function renderRooms(rooms) {
       comparison.className = 'outdoor-comparison'; comparison.hidden = true;
       comparison.dataset.temperature = Number.isFinite(room.temperature) ? String(room.temperature) : 'NaN';
       comparison.dataset.online = String(room.online === true);
-      card.append(comparison, shortcut);
+      const ventilation = document.createElement('details');
+      ventilation.open = expandedRooms.has(room.id);
+      ventilation.className = 'ventilation-guidance';
+      ventilation.dataset.roomId = room.id;
+      ventilation.dataset.online = String(room.online === true);
+      renderVentilationCard(ventilation, room.online === true && indoorFresh(indoorsAt)
+        ? matchingGuidance(room, guidance?.rooms.find(item => item.id === room.id)) : null);
+      const meta = document.createElement('div');
+      meta.className = 'card-meta';
+      meta.append(comparison, shortcut);
+      card.append(meta, ventilation);
       return card;
     })
   );
+  if (focusedGuidance) {
+    [...roomsEl.querySelectorAll('.ventilation-guidance')]
+      .find(el => el.dataset.roomId === focusedGuidance)?.querySelector('summary')?.focus({ preventScroll: true });
+  }
   if (focusedRoom) {
     [...roomsEl.querySelectorAll(".history-shortcut")]
       .find(button => button.dataset.historyId === focusedRoom)?.focus({ preventScroll: true });
