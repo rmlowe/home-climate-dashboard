@@ -10,16 +10,16 @@ test('page startup fetches live weather and renders outdoor panel and room diffe
     append(...nodes) { this.children.push(...nodes); }
     setAttribute() {}
     addEventListener() {}
-    querySelector() { return new Element(); }
+    querySelector(selector) { return selector === 'h2' ? new Element() : this.querySelectorAll(selector)[0] ?? null; }
     querySelectorAll(selector) {
       return this.children.flatMap(child => [
-        ...(child.className === selector.slice(1) ? [child] : []), ...child.querySelectorAll(selector),
+        ...((selector.startsWith('.') ? child.className === selector.slice(1) : child.tagName === selector) ? [child] : []), ...child.querySelectorAll(selector),
       ]);
     }
   }
   const elements = new Map();
   const document = { hidden: false, activeElement: null, addEventListener() {},
-    createElement: () => new Element(), querySelector(selector) {
+    createElement: tagName => Object.assign(new Element(), { tagName }), querySelector(selector) {
       if (!elements.has(selector)) elements.set(selector, new Element());
       return elements.get(selector);
     } };
@@ -51,7 +51,7 @@ test('page startup fetches live weather and renders outdoor panel and room diffe
   assert.ok(calls.includes('/api/ventilation'));
   const guidance = document.querySelector('#rooms').querySelectorAll('.ventilation-guidance')[0];
   assert.equal(guidance.dataset.status, 'uncertain');
-  assert.equal(guidance.children[1].textContent, 'Waiting for confirmation.');
+  assert.equal(guidance.children[1].children[0].textContent, 'Waiting for confirmation.');
   assert.equal(comparison.hidden, false);
   assert.equal(comparison.textContent, '7.0°C warmer than outside estimate');
 });

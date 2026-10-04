@@ -470,7 +470,9 @@ References: [Access JWT validation](https://developers.cloudflare.com/cloudflare
 ### Window guidance
 
 `GET /api/ventilation` and the read-only MCP tool `get_ventilation_guidance({})`
-return the same assessment used by each dashboard room card. No new secrets,
+return the same assessment used by each dashboard room card. Cards show a compact
+conclusion with essential trade-offs; expandable details contain dew points and
+supporting reasons. Expansion and keyboard focus survive polling. No new secrets,
 configuration or database migration are required. Refresh MCP tools after deployment.
 
 The response includes per-room `status`, `summary`, `reasons`, `cooling`, `drying`,

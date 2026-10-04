@@ -76,6 +76,9 @@ async function refresh() {
 
 function renderRooms(rooms) {
   const focusedRoom = document.activeElement?.dataset.historyId;
+  const focusedGuidance = document.activeElement?.dataset.ventilationId;
+  const expandedRooms = new Set([...roomsEl.querySelectorAll('.ventilation-guidance')]
+    .filter(el => el.open).map(el => el.dataset.roomId));
   roomsEl.replaceChildren(
     ...rooms.map((room) => {
       const card = document.createElement("article");
@@ -118,16 +121,24 @@ function renderRooms(rooms) {
       comparison.className = 'outdoor-comparison'; comparison.hidden = true;
       comparison.dataset.temperature = Number.isFinite(room.temperature) ? String(room.temperature) : 'NaN';
       comparison.dataset.online = String(room.online === true);
-      const ventilation = document.createElement('section');
+      const ventilation = document.createElement('details');
+      ventilation.open = expandedRooms.has(room.id);
       ventilation.className = 'ventilation-guidance';
       ventilation.dataset.roomId = room.id;
       ventilation.dataset.online = String(room.online === true);
       renderVentilationCard(ventilation, room.online === true && indoorFresh(indoorsAt)
         ? guidance?.rooms.find(item => item.id === room.id) : null);
-      card.append(comparison, ventilation, shortcut);
+      const meta = document.createElement('div');
+      meta.className = 'card-meta';
+      meta.append(comparison, shortcut);
+      card.append(meta, ventilation);
       return card;
     })
   );
+  if (focusedGuidance) {
+    [...roomsEl.querySelectorAll('.ventilation-guidance')]
+      .find(el => el.dataset.roomId === focusedGuidance)?.querySelector('summary')?.focus({ preventScroll: true });
+  }
   if (focusedRoom) {
     [...roomsEl.querySelectorAll(".history-shortcut")]
       .find(button => button.dataset.historyId === focusedRoom)?.focus({ preventScroll: true });
