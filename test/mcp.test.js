@@ -85,6 +85,7 @@ test('tool returns Celsius, units, retrieval times and opaque IDs; dashboard sha
   const body = await dashboard.json();
   assert.equal(body.rooms[0].id, data.rooms[0].id);
   assert.equal(body.updated, data.retrievedAt);
+  assert.equal(body.rooms[0].retrievedAt, data.rooms[0].retrievedAt);
   assert.equal(state.requests(), 2);
   await rpc('tools/call', { name: 'get_current_conditions', arguments: {} });
   assert.equal(state.requests(), 2);

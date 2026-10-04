@@ -159,7 +159,8 @@ test("live endpoint supplies an opaque room key without a DB", async () => {
   const body = await response.json();
   assert.deepEqual(Object.keys(body).sort(), ["rooms", "updated"]);
   assert.match(body.rooms[0].id, /^[a-f0-9]{64}$/);
-  assert.deepEqual(body.rooms[0], { id: body.rooms[0].id, name: "Living room", temperature: 25, humidity: 45, online: true });
+  assert.ok(Number.isFinite(Date.parse(body.rooms[0].retrievedAt)));
+  assert.deepEqual(body.rooms[0], { retrievedAt: body.rooms[0].retrievedAt, id: body.rooms[0].id, name: "Living room", temperature: 25, humidity: 45, online: true });
   assert.ok(cached);
 });
 

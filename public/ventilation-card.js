@@ -1,3 +1,11 @@
+// Guidance must describe the exact displayed room retrieval, including values.
+export function matchingGuidance(room, assessment) {
+  return room && assessment && typeof room.retrievedAt === 'string' &&
+    room.id === assessment.id && room.retrievedAt === assessment.indoorRetrievedAt &&
+    room.temperature === assessment.temperature && room.humidity === assessment.humidity &&
+    room.online === assessment.online ? assessment : null;
+}
+
 // Keep the compact conclusion useful even when supporting details are closed.
 export function ventilationLabel(assessment) {
   if (!assessment || assessment.status === 'unavailable') return 'Window guidance unavailable';

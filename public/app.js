@@ -1,4 +1,4 @@
-import { renderVentilationCard } from './ventilation-card.js';
+import { renderVentilationCard, matchingGuidance } from './ventilation-card.js';
 import { temperatureDifference, indoorFresh } from './weather-model.js';
 
 const roomsEl = document.querySelector("#rooms");
@@ -6,11 +6,13 @@ const updatedEl = document.querySelector("#updated");
 const errorEl = document.querySelector("#error");
 
 let guidance = null;
+let displayedRooms = new Map();
 let refreshing = false;
 function renderGuidance() {
   for (const el of roomsEl.querySelectorAll('.ventilation-guidance')) {
     renderVentilationCard(el, el.dataset.online === 'true' && indoorFresh(indoorsAt)
-      ? guidance?.rooms.find(room => room.id === el.dataset.roomId) : null);
+      ? matchingGuidance(displayedRooms.get(el.dataset.roomId),
+        guidance?.rooms.find(room => room.id === el.dataset.roomId)) : null);
   }
 }
 async function refreshGuidance() {
@@ -52,7 +54,9 @@ async function refresh() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
+    if (indoorsAt !== data.updated) guidance = null;
     indoorsAt = data.updated;
+    displayedRooms = new Map((data.rooms ?? []).map(room => [room.id, room]));
     renderRooms(data.rooms ?? []);
     renderComparisons();
 
@@ -127,7 +131,7 @@ function renderRooms(rooms) {
       ventilation.dataset.roomId = room.id;
       ventilation.dataset.online = String(room.online === true);
       renderVentilationCard(ventilation, room.online === true && indoorFresh(indoorsAt)
-        ? guidance?.rooms.find(item => item.id === room.id) : null);
+        ? matchingGuidance(room, guidance?.rooms.find(item => item.id === room.id)) : null);
       const meta = document.createElement('div');
       meta.className = 'card-meta';
       meta.append(comparison, shortcut);

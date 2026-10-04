@@ -31,9 +31,9 @@ test('page startup fetches live weather and renders outdoor panel and room diffe
   const now = Date.now(), calls = [];
   t.mock.method(globalThis, 'fetch', async url => {
     calls.push(url);
-    if (url === '/api/ventilation') return Response.json({ rooms: [{ id: 'bedroom', status: 'uncertain', summary: 'Waiting for confirmation.', cooling: 'unknown', drying: 'unknown', validUntil: now + 90_000, reasons: [] }] });
+    if (url === '/api/ventilation') return Response.json({ rooms: [{ id: 'bedroom', temperature: 22, humidity: 50, online: true, indoorRetrievedAt: new Date(now).toISOString(), status: 'uncertain', summary: 'Waiting for confirmation.', cooling: 'unknown', drying: 'unknown', validUntil: now + 90_000, reasons: [] }] });
     if (url === '/api/readings') return Response.json({ updated: new Date(now).toISOString(),
-      rooms: [{ id: 'bedroom', name: 'Bedroom', temperature: 22, humidity: 50, online: true }] });
+      rooms: [{ id: 'bedroom', name: 'Bedroom', temperature: 22, humidity: 50, online: true, retrievedAt: new Date(now).toISOString() }] });
     if (url === '/api/weather') return Response.json({ location: 'Local area', fetchedAt: now,
       current: { validAt: now, temperature: 15, humidity: 65 }, points: [], stale: false, refreshFailed: false });
     if (url.startsWith('/api/history')) return Response.json({ rooms: [] });

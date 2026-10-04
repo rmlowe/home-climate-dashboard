@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderVentilationCard, ventilationLabel } from '../public/ventilation-card.js';
+import { renderVentilationCard, ventilationLabel, matchingGuidance } from '../public/ventilation-card.js';
 
 test('card removes expired effects and inserts source text safely', t => {
   class Element {
@@ -45,4 +45,18 @@ test('compact conclusions retain trade-offs and uncertain states', () => {
   assert.equal(ventilationLabel({ status: 'unavailable' }), 'Window guidance unavailable');
   assert.equal(ventilationLabel({ status: 'helpful', temperature: 27, humidity: 65, drying: 'drier' }), 'Ventilation may cool and dry');
   assert.equal(ventilationLabel({ status: 'helpful', temperature: 27, humidity: 45, cooling: 'cooler' }), 'Ventilation may help cool');
+});
+
+
+test('guidance is tied to the displayed retrieval through refresh and cache rollover', () => {
+  const room = { id: 'room', temperature: 26, humidity: 50, online: true, retrievedAt: '2026-10-04T18:00:00Z' };
+  const assessment = { id: room.id, temperature: 26, humidity: 50, online: true, indoorRetrievedAt: room.retrievedAt };
+  assert.equal(matchingGuidance(room, assessment), assessment);
+  for (const changed of [{ temperature: 24 }, { humidity: 65 }, { online: false },
+    { retrievedAt: '2026-10-04T18:00:30Z' }, { retrievedAt: undefined }]) {
+    assert.equal(matchingGuidance({ ...room, ...changed }, assessment), null);
+  }
+  assert.equal(matchingGuidance(room, { ...assessment, indoorRetrievedAt: '2026-10-04T18:00:30Z' }), null,
+    'newer guidance cannot accompany an older displayed snapshot, even with equal values');
+  assert.equal(matchingGuidance(room, null), null);
 });
