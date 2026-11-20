@@ -33,6 +33,7 @@
     "MCP_AUTH_MODE": "access",
     "MCP_ACCESS_TEAM_DOMAIN": "https://frosty-poetry-2e73.cloudflareaccess.com",
     "MCP_ACCESS_AUD": "f6ed348490565de0791397781d855c7e0a3ebd6424faf26958d403dc21c0d7a7",
+    "MCP_PROJECT_HEALTH_CLIENT_ID": "92c517b5e8809a1365376be8066f363c.access",
     "GOVEE_TEMPERATURE_UNIT": "fahrenheit",
     "WEATHER_LATITUDE": "51.61",
     "WEATHER_LONGITUDE": "-0.21",
