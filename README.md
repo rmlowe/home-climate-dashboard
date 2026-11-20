@@ -409,8 +409,8 @@ Zero Trust; do not deploy example values. Configure them durably in Wrangler
 or your deployment configuration so future deployments retain them.
 
 Access mode uses `jose` to validate RS256 signatures, issuer, application
-audience, expiry and not-before time when present. Expiry, issued-at and a
-nonempty subject are required; future issued-at times are rejected. The only
+audience, expiry and not-before time when present. Expiry and issued-at are required. Household users need a nonempty subject;
+the optional Project Health service identity is described below. In both cases, future issued-at times are rejected. The only
 key source is the configured team's `/cdn-cgi/access/certs` endpoint. JWT
 headers/claims cannot choose another key URL. JWKS resolvers are cached per
 issuer with a five-minute cache, 30-second refresh cooldown and five-second
@@ -510,3 +510,17 @@ This is temperature/moisture comfort guidance, not a CO2, air-quality, condensat
 or safety assessment. It does not prescribe window duration, predict final room
 humidity, or infer that a window is open. Drying and cooling can conflict. Even
 when drying succeeds, relative humidity can temporarily rise as air cools.
+
+### Project Health service identity
+
+In Access mode, optionally set `MCP_PROJECT_HEALTH_CLIENT_ID` to the exact
+Cloudflare service token Client ID. The Worker recognises its verified assertion
+(empty subject and matching `common_name`) and registers only
+`get_collection_health` for that caller. Leaving the variable unset disables
+service access. The service token secret belongs on the calling Worker.
+
+When enabling this, scope the Service Auth policy to the MCP endpoint. Granting
+the service access across the dashboard hostname would also grant access to
+the dashboard's other HTTP routes. If using a separate Access application for
+`/mcp`, configure its audience in `MCP_ACCESS_AUD` and preserve the household
+access policy and Managed OAuth setup for that endpoint.

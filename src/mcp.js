@@ -1,5 +1,5 @@
 import { registerVentilationTool } from './ventilation-tool.js';
-import { registerHistoryTools } from './history-tools.js';
+import { registerHistorySummaryTool, registerCollectionHealthTool } from './history-tools.js';
 import { registerOutdoorTool } from './outdoor-tool.js';
 import { registerComparisonTool } from './comparison-tool.js';
 import { mcpAuthConfig, authenticateMcp } from './mcp-auth.js';
@@ -21,8 +21,12 @@ const outputSchema = {
   })),
 };
 
-function createServer(request, env, ctx) {
+function createServer(request, env, ctx, identity) {
   const server = new McpServer({ name: 'home-climate', version: '0.1.0' });
+  if (identity === 'project-health') {
+    registerCollectionHealthTool(server, env);
+    return server;
+  }
   server.registerTool('get_current_conditions', {
     description: 'Read current indoor temperature and humidity for all household rooms. '
       + 'Readings may be cached for 30 seconds. Timestamps record API retrieval, not sensor measurement. '
@@ -40,7 +44,8 @@ function createServer(request, env, ctx) {
       return { isError: true, content: [{ type: 'text', text: 'Unable to retrieve Govee readings. Try again later.' }] };
     }
   });
-  registerHistoryTools(server, env);
+  registerHistorySummaryTool(server, env);
+  registerCollectionHealthTool(server, env);
   registerOutdoorTool(server, request, env, ctx);
   registerComparisonTool(server, env);
   registerVentilationTool(server, request, env, ctx);
@@ -55,8 +60,9 @@ export async function handleMcp(request, env, ctx) {
   }
   const origin = request.headers.get('Origin');
   if (origin && origin !== new URL(request.url).origin) return denied(403);
-  if (!await authenticateMcp(request, auth)) return denied(401);
-  const response = await createMcpHandler(() => createServer(request, env, ctx), {
+  const identity = await authenticateMcp(request, auth);
+  if (!identity) return denied(401);
+  const response = await createMcpHandler(() => createServer(request, env, ctx, identity), {
     route: '/mcp', corsOptions: false,
     allowedOriginHostnames: [new URL(request.url).hostname],
   })(request, env, ctx);
