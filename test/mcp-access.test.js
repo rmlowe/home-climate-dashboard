@@ -26,13 +26,13 @@ async function token(env, changes = {}, key = privateKey, header = {}) {
   for (const name of Object.keys(claims)) if (claims[name] === undefined) delete claims[name];
   return new SignJWT(claims).setProtectedHeader({ alg: 'RS256', kid: 'test-key', ...header }).sign(key);
 }
-function call(env, assertion, extraHeaders = {}, method = 'tools/list') {
+function call(env, assertion, extraHeaders = {}, method = 'tools/list', tool = 'get_current_conditions') {
   return worker.fetch(new Request('http://localhost/mcp', {
     method: 'POST', headers: { Host: 'localhost', 'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25',
       ...(assertion ? { 'Cf-Access-Jwt-Assertion': assertion } : {}), ...extraHeaders },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method,
-      params: method === 'tools/call' ? { name: 'get_current_conditions', arguments: {} } : {} }),
+      params: method === 'tools/call' ? { name: tool, arguments: {} } : {} }),
   }), env, { waitUntil(p) { return p; } });
 }
 
@@ -117,4 +117,33 @@ test('cross-origin requests remain denied with a valid Access assertion', async 
   const f = fixture();
   assert.equal((await call(f.env, await token(f.env), { Origin: 'https://evil.example' })).status, 403);
   assert.equal(f.keyRequests(), 0);
+});
+
+
+test('Project Health can discover and call only collection health', async () => {
+  const { env } = fixture();
+  const clientId = 'health-client.access';
+  const claims = { sub: '', common_name: clientId };
+  const jwt = await token(env, claims);
+  assert.equal((await call(env, jwt)).status, 401);
+  env.MCP_PROJECT_HEALTH_CLIENT_ID = clientId;
+  for (const changes of [{ common_name: 'other.access' }, { sub: 'ambiguous' }, { aud: 'wrong' }]) {
+    assert.equal((await call(env, await token(env, { ...claims, ...changes }))).status, 401);
+  }
+  const parse = async response => {
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    const data = body.split('\n').find(line => line.startsWith('data:'));
+    return JSON.parse(data ? data.slice(5) : body);
+  };
+  const listed = await parse(await call(env, jwt));
+  assert.deepEqual(listed.result.tools.map(tool => tool.name), ['get_collection_health']);
+  const denied = await parse(await call(env, jwt, {}, 'tools/call'));
+  assert.match(JSON.stringify(denied), /not found|unknown tool|unrecognized tool/i);
+  env.DB = { prepare: () => ({ bind() { return this; }, async first() { return null; },
+    async all() { return { results: [] }; } }) };
+  const health = await parse(await call(env, jwt, {}, 'tools/call', 'get_collection_health'));
+  assert.equal(health.result.structuredContent.collectionStatus, 'no_data');
+  const household = await parse(await call(env, await token(env)));
+  assert.equal(household.result.tools.length, 6);
 });

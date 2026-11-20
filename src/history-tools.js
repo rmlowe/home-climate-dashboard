@@ -29,7 +29,7 @@ export function summaryWindow(args, now = Date.now()) {
   return { from, to };
 }
 
-export function registerHistoryTools(server, env) {
+export function registerHistorySummaryTool(server, env) {
   server.registerTool('get_history_summary', {
     description: 'Summarize indoor temperature and humidity from stored history for all rooms. Defaults to the last 24 hours. '
       + 'For overnight or custom questions supply both from and to as ISO timestamps with timezone offsets, within the last seven days. '
@@ -55,7 +55,9 @@ export function registerHistoryTools(server, env) {
         rooms: history.rooms.map(room => summarizeRoom(room, history)) });
     } catch { return error('Unable to retrieve stored history. Try again later.'); }
   });
+}
 
+export function registerCollectionHealthTool(server, env) {
   server.registerTool('get_collection_health', {
     description: 'Inspect stored collection health for all known rooms, including stopped rooms. Reports latest collection, latest valid reading, '
       + 'last recorded sensor status and separate temperature/humidity coverage over the last 24 hours. Does not poll sensors. '
